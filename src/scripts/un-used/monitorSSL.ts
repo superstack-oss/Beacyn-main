@@ -1,5 +1,4 @@
 import tls from 'tls';
-import net from 'net';
 
 export function monitorSSL(hostname: string, port = 443) {
   return new Promise((resolve) => {

@@ -4,12 +4,8 @@ import {
   Settings, Terminal, Menu, Hexagon, X, Box,
   Moon, Sun, HelpCircle, RefreshCw, ChevronDown,
   Search, Network, Activity, Database,
-  HardDrive,
-  CloudBackup,
-  NetworkIcon
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { Storage } from '@hugeicons/core-free-icons';
 
 interface Props {
   children: React.ReactNode;

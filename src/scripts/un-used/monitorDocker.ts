@@ -1,7 +1,7 @@
 import http from 'http';
 
 export function monitorDocker(socketPath = '/var/run/docker.sock') {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const options = {
       socketPath,
       path: '/containers/json?all=true',
