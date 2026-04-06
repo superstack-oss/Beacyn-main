@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../../components/ui/sheet';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Cpu, HardDrive, Info, MemoryStick, Network, Server, Thermometer, ArrowLeft, ShieldCheck, AlertTriangle, Activity } from 'lucide-react';
+import { apiUrl } from '../../lib/api';
 
 interface TrendPoint {
   time: string;
@@ -189,7 +190,7 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`http://localhost:3001/api/infra/servers/${encodeURIComponent(agentId)}?limit=72`);
+        const res = await fetch(apiUrl(`/api/infra/servers/${encodeURIComponent(agentId)}?limit=72`));
         if (!res.ok) throw new Error('details unavailable');
         const data: ServerDetail = await res.json();
         if (!ignore) {

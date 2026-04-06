@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ArrowLeft, Database, HardDrive, Server, ShieldCheck, Cpu, Clock3 } from 'lucide-react';
+import { apiUrl } from '../../lib/api';
 
 interface DatabaseDetailsProps {
   targetKey: string | null;
@@ -137,7 +138,7 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`http://localhost:3001/api/databases/${encodeURIComponent(targetKey)}?limit=72`);
+        const res = await fetch(apiUrl(`/api/databases/${encodeURIComponent(targetKey)}?limit=72`));
         if (!res.ok) throw new Error('details unavailable');
         const data = await res.json();
         if (!ignore) setDetail(data);

@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Search, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { apiUrl } from '../../lib/api';
 
 interface InvestigatePageProps {
   onOpenServer: (agentId: string) => void;
@@ -78,7 +79,7 @@ export default function InvestigatePage({ onOpenServer }: InvestigatePageProps) 
           page: '1',
           pageSize: '100',
         });
-        const res = await fetch(`http://localhost:3001/api/investigate?${params.toString()}`);
+        const res = await fetch(apiUrl(`/api/investigate?${params.toString()}`));
         const data = await res.json();
         if (!ignore) setTickets(data?.tickets || []);
       } catch {

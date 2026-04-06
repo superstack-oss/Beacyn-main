@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Search, Database } from 'lucide-react';
+import { apiUrl } from '../../lib/api';
 
 interface DatabasePageProps {
   onOpenDetails: (targetKey: string) => void;
@@ -80,7 +81,7 @@ export default function DatabasePage({ onOpenDetails }: DatabasePageProps) {
           pageSize: String(pageSize),
         });
 
-        const res = await fetch(`http://localhost:3001/api/databases?${params.toString()}`);
+        const res = await fetch(apiUrl(`/api/databases?${params.toString()}`));
         const data = await res.json();
 
         if (!ignore) {

@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Search, Server, Cpu, HardDrive, MemoryStick, Gauge } from 'lucide-react';
 import { Button } from '../../components/ui/button';
+import { apiUrl } from '../../lib/api';
 
 interface InfrastructurePageProps {
   onOpenDetails: (agentId: string) => void;
@@ -74,8 +75,8 @@ export default function InfrastructurePage({ onOpenDetails }: InfrastructurePage
         });
 
         const [serversRes, healthRes] = await Promise.all([
-          fetch(`http://localhost:3001/api/infra/servers?${params.toString()}`),
-          fetch('http://localhost:3001/api/health/latest'),
+          fetch(apiUrl(`/api/infra/servers?${params.toString()}`)),
+          fetch(apiUrl('/api/health/latest')),
         ]);
 
         const [serversData, healthData] = await Promise.all([

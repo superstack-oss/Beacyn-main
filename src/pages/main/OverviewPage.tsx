@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/ca
 import { Activity, Server, AlertTriangle, Clock, CheckCircle2, TrendingUp, Wifi } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { apiUrl } from '../../lib/api';
 
 // ─── Empty state placeholder ─────────────────────────────────────────────────
 function EmptyState({ title, message }: { title: string; message: string }) {
@@ -50,7 +51,7 @@ export default function OverviewPage() {
 
   useEffect(() => {
     const load = () => {
-      fetch('http://localhost:3001/api/overview')
+      fetch(apiUrl('/api/overview'))
         .then(r => r.json())
         .then(d => { setData(d); setLoading(false); })
         .catch(() => setLoading(false));

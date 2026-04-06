@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Input } from '../../components/ui/input';
+import { apiUrl } from '../../lib/api';
 
 type AgentStatus = 'Actively Syncing' | 'Delayed Sync' | 'Offline';
 
@@ -101,7 +102,7 @@ export default function AgentsPage() {
     const loadAgents = async () => {
       setLoading(true);
       try {
-        const res = await fetch('http://localhost:3001/api/agents');
+        const res = await fetch(apiUrl('/api/agents'));
         if (!res.ok) throw new Error('agents endpoint unavailable');
         const data = await res.json();
         if (!ignore) setAgents(Array.isArray(data) ? data : []);

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger, SheetClose } from '../../components/ui/sheet';
 import { Plus, Search, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Settings2, Trash2, PenLine, PauseCircle, Flag } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
+import { apiUrl } from '../../lib/api';
 
 const PAGE_SIZE = 10;
 
@@ -48,7 +49,7 @@ export default function InventoryPage() {
   };
 
   useEffect(() => {
-    fetch('http://localhost:3001/api/assets')
+    fetch(apiUrl('/api/assets'))
       .then(res => res.json())
       .then(data => { if (Array.isArray(data)) setInventory(data); })
       .catch(err => console.error('Error fetching assets:', err));
@@ -99,7 +100,7 @@ export default function InventoryPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this asset? This cannot be undone.')) return;
     try {
-      await fetch(`http://localhost:3001/api/assets/${id}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/assets/${id}`), { method: 'DELETE' });
       setInventory(prev => prev.filter(i => i.id !== id));
     } catch (err) {
       console.error('Failed to delete:', err);
@@ -223,7 +224,7 @@ export default function InventoryPage() {
                       target = newPortHost.trim() + (newPort ? `:${newPort.trim()}` : '');
                     }
                     if (!target) { alert('Please enter a valid endpoint / URL / IP address.'); return; }
-                    const res = await fetch('http://localhost:3001/api/assets', {
+                    const res = await fetch(apiUrl('/api/assets'), {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ name: newName || 'Unnamed Asset', parent_type: newItemType, sub_type: newSubItemType || null, target_endpoint: target, environment: newEnvironment })

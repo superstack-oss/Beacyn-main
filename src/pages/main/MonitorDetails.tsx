@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { ChevronRight, Mail, Bug, TrendingUp, AlertTriangle, Gauge, Clock, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, ResponsiveContainer, AreaChart, Area, XAxis, CartesianGrid } from 'recharts';
+import { apiUrl } from '../../lib/api';
 
 interface MonitorDetailsProps {
   monitor: any;
@@ -45,7 +46,7 @@ export default function MonitorDetails({ monitor, onBack }: MonitorDetailsProps)
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:3001/api/assets/${monitor.id}/stats`);
+      const res = await fetch(apiUrl(`/api/assets/${monitor.id}/stats`));
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Server returned ${res.status} — ${text.slice(0, 120)}`);

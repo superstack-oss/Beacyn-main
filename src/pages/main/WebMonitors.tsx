@@ -10,6 +10,7 @@ import { BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { useState, useEffect } from 'react';
 import MonitorDetails from './MonitorDetails';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
+import { apiUrl } from '../../lib/api';
 
 const TinyBarChart = ({ data }: { data: number[] }) => {
   const chartData = data.map((val, i) => ({ name: `T${i}`, value: val }));
@@ -30,7 +31,7 @@ export default function WebMonitors() {
 
   useEffect(() => {
     const load = () => {
-      fetch('http://localhost:3001/api/assets')
+      fetch(apiUrl('/api/assets'))
         .then(res => res.json())
         .then(data => { if (Array.isArray(data)) setEndpoints(data); })
         .catch(err => console.error('Error fetching monitors:', err));

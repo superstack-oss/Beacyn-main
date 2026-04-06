@@ -17,6 +17,14 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (_req, res) => {
+  res.status(200).json({ service: 'PulseIQ Backend', status: 'ok' });
+});
+
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
 type TicketSeverity = 'P1' | 'P2' | 'P3';
 
 type IncidentTriggerKind = 'down-or-unreachable' | 'failed-hardware' | 'critical-service' | 'data-disk-90';
@@ -526,6 +534,7 @@ async function runCheck(asset: any) {
           {
             code: result.error?.code || 'MON_DOWN',
             explanation: result.error?.explanation || 'Monitor reported down status',
+            raw: result.error?.raw || null,
             diagnostics: result.diagnostics || {},
           },
           null,
@@ -573,7 +582,8 @@ async function runAllChecks() {
 ensureSnowIncidentTable()
   .catch((err) => console.warn('ServiceNow incident mapping table init skipped:', (err as any)?.message || err))
   .finally(() => {
-    runAllChecks();
+    // Give platform health checks a brief window before first heavy monitoring cycle.
+    setTimeout(runAllChecks, 5000);
     setInterval(runAllChecks, 60_000);
   });
 

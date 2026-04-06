@@ -1,6 +1,7 @@
 import http from 'http';
 import net from 'net';
 import tls from 'tls';
+import dns from 'dns/promises';
 import ping from 'ping';
 
 export type MonitorKind = 'website' | 'api' | 'ping' | 'port' | 'docker' | 'ssl' | 'pagespeed' | 'unknown';
@@ -35,6 +36,10 @@ function nowIso() {
 
 function mapFailure(message: string): MonitorError {
   const m = (message || '').toLowerCase();
+
+  if (m.includes('operation not permitted') || m.includes('permission denied') || m.includes('raw socket') || m.includes('ping:') || m.includes('command not found') || m.includes('exited with code')) {
+    return { code: 'MON_ICMP_UNAVAILABLE', explanation: 'ICMP ping is not available in this runtime environment (common in managed/container platforms).', raw: message };
+  }
 
   if (m.includes('getaddrinfo') || m.includes('enotfound') || m.includes('dns')) {
     return { code: 'MON_DNS_LOOKUP_FAILED', explanation: 'DNS lookup failed. Hostname does not resolve from monitor host.', raw: message };
@@ -119,7 +124,87 @@ export async function monitorPingTarget(host: string) {
       checkedAt: nowIso(),
     };
   } catch (error: any) {
-    const mapped = mapFailure(error?.message || 'ping failed');
+    const rawMessage = error?.message || 'ping failed';
+    const mapped = mapFailure(rawMessage);
+
+    // Some hosted platforms block ICMP. In that case, try DNS + TCP fallback checks.
+    if (mapped.code === 'MON_ICMP_UNAVAILABLE') {
+      const diagnostics: Record<string, any> = {
+        host,
+        icmpUnavailable: true,
+      };
+
+      try {
+        const resolved = await dns.lookup(host);
+        diagnostics.resolvedIp = resolved.address;
+      } catch (dnsErr: any) {
+        const dnsMapped = mapFailure(dnsErr?.message || 'dns lookup failed');
+        return {
+          kind: 'ping' as const,
+          ok: false,
+          status: 'Down' as const,
+          statusCode: 0,
+          latencyMs: Math.round(performance.now() - start),
+          message: 'ICMP unavailable and DNS lookup failed',
+          error: dnsMapped,
+          diagnostics,
+          checkedAt: nowIso(),
+        };
+      }
+
+      const tcp443 = await monitorPortTarget(host, 443);
+      if (tcp443.ok) {
+        return {
+          kind: 'ping' as const,
+          ok: true,
+          status: 'Up' as const,
+          statusCode: 200,
+          latencyMs: tcp443.latencyMs,
+          message: 'ICMP unavailable; TCP fallback succeeded on port 443',
+          diagnostics: {
+            ...diagnostics,
+            tcpFallbackPort: 443,
+            tcpLatencyMs: tcp443.latencyMs,
+          },
+          checkedAt: nowIso(),
+        };
+      }
+
+      const tcp80 = await monitorPortTarget(host, 80);
+      if (tcp80.ok) {
+        return {
+          kind: 'ping' as const,
+          ok: true,
+          status: 'Up' as const,
+          statusCode: 200,
+          latencyMs: tcp80.latencyMs,
+          message: 'ICMP unavailable; TCP fallback succeeded on port 80',
+          diagnostics: {
+            ...diagnostics,
+            tcpFallbackPort: 80,
+            tcpLatencyMs: tcp80.latencyMs,
+          },
+          checkedAt: nowIso(),
+        };
+      }
+
+      return {
+        kind: 'ping' as const,
+        ok: false,
+        status: 'Down' as const,
+        statusCode: 0,
+        latencyMs: Math.round(performance.now() - start),
+        message: 'ICMP unavailable and TCP fallback failed',
+        error: mapped,
+        diagnostics: {
+          ...diagnostics,
+          tcp443: { ok: tcp443.ok, message: tcp443.message, errorCode: tcp443.error?.code || null },
+          tcp80: { ok: tcp80.ok, message: tcp80.message, errorCode: tcp80.error?.code || null },
+        },
+        checkedAt: nowIso(),
+      };
+    }
+
     return {
       kind: 'ping' as const,
       ok: false,
