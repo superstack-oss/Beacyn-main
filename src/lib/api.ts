@@ -1,9 +1,18 @@
 const rawApiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
 
+function normalizeApiBase(base: string | undefined) {
+  if (!base) return '';
+  const clean = base.trim().replace(/\/$/, '');
+  if (/^https:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(clean)) {
+    return clean.replace(/^https:/i, 'http:');
+  }
+  return clean;
+}
+
 // In production, set VITE_API_BASE_URL (e.g. https://your-backend.example.com).
 // In local development, fallback to localhost backend.
 const API_BASE = rawApiBase && rawApiBase.length > 0
-  ? rawApiBase.replace(/\/$/, '')
+  ? normalizeApiBase(rawApiBase)
   : 'http://localhost:3001';
 
 export function apiUrl(path: string) {

@@ -6,6 +6,10 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    allowedHosts: ['localhost', 'pulseiq.kompedia.in','app.kompedia.in'],
+    port: 5173,
+  },
   plugins: [
     tailwindcss(),
     react(),

@@ -1,0 +1,192 @@
+{
+  "entries": [
+    {
+      "id": "icmp-request-timeout",
+      "errorName": "Request Timed Out",
+      "errorCode": "No numeric code (ICMP timeout)",
+      "keywords": ["request timed out", "icmp timeout", "mon_timeout", "timed out"],
+      "causes": [
+        "Target host is down or unreachable.",
+        "Firewall is blocking ICMP traffic.",
+        "Network congestion or packet loss.",
+        "Incorrect IP address or hostname.",
+        "Routing issue between source and destination."
+      ],
+      "troubleshooting": [
+        "Verify IP address or hostname.",
+        "Check if the host is powered on and reachable locally.",
+        "Allow ICMP in firewall or test with firewall temporarily disabled.",
+        "Test from another network segment.",
+        "Run traceroute to identify the failing hop."
+      ]
+    },
+    {
+      "id": "icmp-destination-unreachable",
+      "errorName": "Destination Host Unreachable",
+      "errorCode": "ICMP Type 3",
+      "keywords": ["destination host unreachable", "unreachable", "no route", "mon_network_unreachable"],
+      "causes": [
+        "No route to destination.",
+        "Router cannot find valid path.",
+        "Incorrect subnet mask or gateway configuration.",
+        "ARP resolution failure in local network."
+      ],
+      "troubleshooting": [
+        "Check local IP configuration (ipconfig or ifconfig).",
+        "Verify default gateway.",
+        "Ensure both devices are in the same subnet for LAN use cases.",
+        "Inspect routing table (route print or ip route)."
+      ]
+    },
+    {
+      "id": "icmp-general-failure",
+      "errorName": "General Failure",
+      "errorCode": "OS-level (platform specific)",
+      "keywords": ["general failure", "network adapter", "tcp/ip stack", "vpn"],
+      "causes": [
+        "Network adapter issue.",
+        "TCP/IP stack corruption.",
+        "VPN or endpoint agent interference.",
+        "Local firewall blocking traffic."
+      ],
+      "troubleshooting": [
+        "Restart network adapter.",
+        "Reset TCP/IP stack.",
+        "Disable VPN temporarily.",
+        "Reinstall or update NIC driver."
+      ]
+    },
+    {
+      "id": "dns-unknown-host",
+      "errorName": "Unknown Host / Could Not Find Host",
+      "errorCode": "DNS resolution failure",
+      "keywords": ["unknown host", "could not find host", "dns", "getaddrinfo", "enotfound", "mon_dns_lookup_failed"],
+      "causes": [
+        "DNS server is not responding.",
+        "Incorrect hostname.",
+        "No internet or upstream connectivity.",
+        "Resolver policy issue."
+      ],
+      "troubleshooting": [
+        "Try pinging an IP instead of hostname.",
+        "Validate DNS settings on probe host.",
+        "Run nslookup for target domain.",
+        "Switch to known resolver (for example 8.8.8.8) for testing."
+      ]
+    },
+    {
+      "id": "ttl-expired",
+      "errorName": "TTL Expired in Transit",
+      "errorCode": "ICMP Type 11",
+      "keywords": ["ttl expired", "time exceeded", "routing loop"],
+      "causes": [
+        "Routing loop in network path.",
+        "Packet exceeded hop limit before reaching destination."
+      ],
+      "troubleshooting": [
+        "Run traceroute to detect routing loop.",
+        "Review routing configuration on intermediate routers.",
+        "Escalate to ISP or network team with hop evidence."
+      ]
+    },
+    {
+      "id": "tcp-connection-timeout",
+      "errorName": "Connection Timed Out",
+      "errorCode": "TCP timeout",
+      "keywords": ["connection timed out", "tcp timeout", "port check timed out", "mon_timeout"],
+      "causes": [
+        "Port blocked by firewall or ACL.",
+        "Server not reachable from probe.",
+        "Service is not listening.",
+        "Network congestion or packet drop."
+      ],
+      "troubleshooting": [
+        "Validate service port and listener status.",
+        "Verify firewall rules on source and destination.",
+        "Test from another host/network.",
+        "Use netcat or nmap to confirm port reachability."
+      ]
+    },
+    {
+      "id": "tcp-connection-refused",
+      "errorName": "Connection Refused",
+      "errorCode": "TCP RST",
+      "keywords": ["connection refused", "econnrefused", "mon_connection_refused"],
+      "causes": [
+        "Service is not running on target port.",
+        "Port is closed.",
+        "Application crashed or listener failed to bind."
+      ],
+      "troubleshooting": [
+        "Ensure target service is running.",
+        "Verify configured host and port.",
+        "Restart application or service.",
+        "Review application and system logs for bind errors."
+      ]
+    },
+    {
+      "id": "tcp-could-not-open",
+      "errorName": "Could Not Open Connection",
+      "errorCode": "Generic client error",
+      "keywords": ["could not open connection", "could not open", "socket error"],
+      "causes": [
+        "DNS resolution failure.",
+        "Wrong IP or hostname.",
+        "Network path unavailable."
+      ],
+      "troubleshooting": [
+        "Validate hostname and IP.",
+        "Ping host first to confirm base reachability.",
+        "Check DNS resolution and route path."
+      ]
+    },
+    {
+      "id": "network-unreachable",
+      "errorName": "Network Unreachable",
+      "errorCode": "OS/network stack error",
+      "keywords": ["network unreachable", "enetunreach", "ehostunreach", "no route to host", "mon_network_unreachable"],
+      "causes": [
+        "No route to destination network.",
+        "Default gateway issue.",
+        "Network interface down or misconfigured."
+      ],
+      "troubleshooting": [
+        "Check routing table.",
+        "Verify gateway and interface state.",
+        "Confirm VLAN/subnet reachability end-to-end."
+      ]
+    },
+    {
+      "id": "connection-closed",
+      "errorName": "Connection Closed by Foreign Host",
+      "errorCode": "TCP terminated",
+      "keywords": ["connection closed", "closed by foreign host", "connection reset", "econnreset"],
+      "causes": [
+        "Service accepted then dropped the connection.",
+        "Idle timeout configuration.",
+        "Security policy terminated session."
+      ],
+      "troubleshooting": [
+        "Inspect server-side logs for disconnect reason.",
+        "Verify application keepalive and timeout settings.",
+        "Check security appliances for active resets."
+      ]
+    },
+    {
+      "id": "tls-handshake-failed",
+      "errorName": "TLS Handshake Failed",
+      "errorCode": "TLS/SSL failure",
+      "keywords": ["tls handshake failed", "certificate", "ssl", "mon_tls_handshake_failed"],
+      "causes": [
+        "Invalid, expired, or mismatched certificate.",
+        "Unsupported TLS version or cipher.",
+        "TLS interception or middlebox issue."
+      ],
+      "troubleshooting": [
+        "Validate certificate chain and SAN/CN.",
+        "Confirm TLS protocol and cipher compatibility.",
+        "Test endpoint with openssl s_client or browser diagnostics."
+      ]
+    }
+  ]
+}

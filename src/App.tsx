@@ -41,6 +41,9 @@ function App() {
               setSelectedInfraAgentId(agentId);
               setRoute('infra-detail');
             }}
+            onOpenIncidents={() => {
+              setRoute('investigate');
+            }}
           />
         );
       case 'database':

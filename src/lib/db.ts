@@ -7,8 +7,7 @@ const user = process.env.DB_USER || 'root';
 const password = process.env.DB_PASSWORD || '';
 const database = process.env.DB_NAME || 'pulseiq';
 const port = Number(process.env.DB_PORT || 3306);
-const isLocalHost = host === 'localhost' || host === '127.0.0.1';
-const useSsl = (process.env.DB_SSL || '').toLowerCase() === 'true' || !isLocalHost;
+const useSsl = (process.env.DB_SSL || '').toLowerCase() === 'true';
 const rejectUnauthorized = (process.env.DB_SSL_REJECT_UNAUTHORIZED || '').toLowerCase() === 'true';
 
 if (!Number.isFinite(port) || port <= 0) {

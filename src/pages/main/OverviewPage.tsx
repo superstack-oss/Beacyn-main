@@ -121,7 +121,7 @@ export default function OverviewPage() {
             <span className="text-xs text-zinc-400">Last 24 hours · auto-refreshes every 60s</span>
           </div>
         </CardHeader>
-        <CardContent className="h-[260px] pt-2">
+        <CardContent className="h-[260px] min-h-[260px] min-w-0 pt-2">
           {!loading && (!data?.trend || data.trend.length === 0) ? (
             <div className="h-full border-2 border-dashed border-zinc-100 rounded-lg">
               <EmptyState
@@ -130,7 +130,8 @@ export default function OverviewPage() {
               />
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <div className="h-full min-h-[220px] min-w-0 w-full">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
               <AreaChart data={data?.trend || []}>
                 <defs>
                   <linearGradient id="colorLatency" x1="0" y1="0" x2="0" y2="1">
@@ -148,6 +149,7 @@ export default function OverviewPage() {
                 <Area type="monotone" dataKey="latency" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorLatency)" dot={false} />
               </AreaChart>
             </ResponsiveContainer>
+            </div>
           )}
         </CardContent>
       </Card>

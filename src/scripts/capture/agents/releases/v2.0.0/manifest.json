@@ -1,0 +1,79 @@
+{
+  "version": "v2.0.0",
+  "generatedAt": "2026-04-07T13:43:18.665787+00:00",
+  "downloadBaseURL": "",
+  "files": [
+    {
+      "name": "MacOSCapture",
+      "size": 6351536,
+      "sha256": "b066011014e61a2bf3eb6786a612ad99eee78462837c22199f6778677e6233cd",
+      "targetOS": "darwin",
+      "targetArch": "amd64",
+      "distro": "macOS"
+    },
+    {
+      "name": "WindowsCapture.exe",
+      "size": 6415872,
+      "sha256": "83781b8540ffde361c48d1059b239da9a5b72f36188c4fae9af8afc1b7287190",
+      "targetOS": "windows",
+      "targetArch": "amd64",
+      "distro": "windows"
+    },
+    {
+      "name": "RHELCapture",
+      "size": 6271138,
+      "sha256": "50735897677f403d66105c6c2de62a98a51465ab523c2b5d6bcac0bce8dfdca8",
+      "targetOS": "linux",
+      "targetArch": "amd64",
+      "distro": "rhel-family"
+    },
+    {
+      "name": "DebianCapture",
+      "size": 6271138,
+      "sha256": "50735897677f403d66105c6c2de62a98a51465ab523c2b5d6bcac0bce8dfdca8",
+      "targetOS": "linux",
+      "targetArch": "amd64",
+      "distro": "debian"
+    },
+    {
+      "name": "UbuntuCapture",
+      "size": 6271138,
+      "sha256": "50735897677f403d66105c6c2de62a98a51465ab523c2b5d6bcac0bce8dfdca8",
+      "targetOS": "linux",
+      "targetArch": "amd64",
+      "distro": "ubuntu"
+    },
+    {
+      "name": "GeneralUnixLinuxCapture",
+      "size": 6271138,
+      "sha256": "50735897677f403d66105c6c2de62a98a51465ab523c2b5d6bcac0bce8dfdca8",
+      "targetOS": "linux",
+      "targetArch": "amd64",
+      "distro": "generic"
+    },
+    {
+      "name": "AIXCapture",
+      "size": 7073434,
+      "sha256": "dda734a760feb2a1b88e539d00400905d72bf71dab18c648e49393545fbe38de",
+      "targetOS": "aix",
+      "targetArch": "ppc64",
+      "distro": "aix"
+    },
+    {
+      "name": "install-agent.sh",
+      "size": 8520,
+      "sha256": "7e2407c35568b3d21cc9d9836e0aaae39a56b7484c852d91307a08b6789aa401",
+      "targetOS": "installer",
+      "targetArch": "any",
+      "distro": "all"
+    },
+    {
+      "name": "HPUXCapture.UNSUPPORTED",
+      "size": 155,
+      "sha256": "8f552487c394d67b1df0e7b81d0f9f589f256566b9265439b39b2d3ccdab0c7f",
+      "targetOS": "hpux",
+      "targetArch": "n/a",
+      "distro": "hpux"
+    }
+  ]
+}

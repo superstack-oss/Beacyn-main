@@ -3,12 +3,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
-import { Search, Server, Cpu, HardDrive, MemoryStick, Gauge } from 'lucide-react';
+import { Search, Server, Gauge, Settings2, Eye, Bug, PauseCircle, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { apiUrl } from '../../lib/api';
 
 interface InfrastructurePageProps {
   onOpenDetails: (agentId: string) => void;
+  onOpenIncidents?: (agentId: string) => void;
+  onPause?: (agentId: string) => void;
+  onDelete?: (agentId: string) => void;
 }
 
 interface ServerListItem {
@@ -32,26 +36,73 @@ interface LatestHealthItem {
   checkedAt: string;
 }
 
-function statusClass(status: string) {
-  if (status === 'Up') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (status === 'Delayed') return 'bg-amber-50 text-amber-700 border-amber-200';
-  return 'bg-rose-50 text-rose-700 border-rose-200';
+function statusClass(status: 'Up' | 'Warning' | 'Down') {
+  if (status === 'Up') return 'border-emerald-200/90 bg-emerald-50/90 text-emerald-700';
+  if (status === 'Warning') return 'border-amber-200/90 bg-amber-50/90 text-amber-700';
+  return 'border-rose-200/90 bg-rose-50/90 text-rose-700';
 }
 
-function healthClass(isHealthy: boolean) {
-  return isHealthy
-    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    : 'bg-rose-50 text-rose-700 border-rose-200';
+function statusDotClass(status: 'Up' | 'Warning' | 'Down') {
+  if (status === 'Up') return 'bg-emerald-500';
+  if (status === 'Warning') return 'bg-amber-500';
+  return 'bg-rose-500';
 }
 
-function scoreClass(status: 'Info' | 'Warning' | 'Critical' | null) {
-  if (status === 'Info') return 'bg-sky-50 text-sky-700 border-sky-200';
-  if (status === 'Warning') return 'bg-amber-50 text-amber-700 border-amber-200';
-  if (status === 'Critical') return 'bg-rose-50 text-rose-700 border-rose-200';
-  return 'bg-zinc-50 text-zinc-700 border-zinc-200';
+function deriveDisplayStatus(row: ServerListItem, health?: LatestHealthItem): 'Up' | 'Warning' | 'Down' {
+  const maxUtil = Math.max(row.cpuUsagePct || 0, row.memoryUsagePct || 0, row.diskUsagePct || 0);
+  if (row.status === 'Down') return 'Down';
+  if (row.status === 'Delayed') return 'Warning';
+  if (health && !health.healthy) return maxUtil >= 95 ? 'Down' : 'Warning';
+  if (maxUtil >= 90) return 'Warning';
+  return 'Up';
 }
 
-export default function InfrastructurePage({ onOpenDetails }: InfrastructurePageProps) {
+function utilizationPalette(value: number) {
+  if (value >= 85) return { from: '#ef4444', to: '#dc2626' };
+  if (value >= 60) return { from: '#f59e0b', to: '#d97706' };
+  return { from: '#22c55e', to: '#16a34a' };
+}
+
+function CircularUtilization({ value, idKey }: { value: number; idKey: string }) {
+  const safe = Math.max(0, Math.min(100, Number(value || 0)));
+  const radius = 30;
+  const size = 72;
+  const stroke = 5;
+  const circumference = 2 * Math.PI * radius; 
+  const offset = circumference * (1 - safe / 100);
+  const palette = utilizationPalette(safe);
+  const gradientId = `util-grad-${idKey.replace(/[^a-z0-9-_]/gi, '')}`;
+
+  return (
+    <div className="relative inline-flex h-[72px] w-[72px] items-center justify-center">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={palette.from} />
+            <stop offset="100%" stopColor={palette.to} />
+          </linearGradient>
+        </defs>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#e4e4e7" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={`url(#${gradientId})`}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="transition-[stroke-dashoffset] duration-500 ease-out"
+        />
+      </svg>
+      <div className="absolute h-9 w-9 rounded-full bg-white dark:bg-zinc-950" />
+      <span className="absolute text-xs font-semibold text-zinc-900 dark:text-zinc-100">{safe.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onPause, onDelete }: InfrastructurePageProps) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -114,15 +165,18 @@ export default function InfrastructurePage({ onOpenDetails }: InfrastructurePage
 
   return (
     <div className="space-y-6">
-      <Card className="border-zinc-200 dark:border-zinc-800">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
+      <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2 text-zinc-800 dark:text-zinc-100">
             <Server className="w-4 h-4" /> Infrastructure monitors
+            <span className="inline-flex items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 text-xs text-zinc-500">
+              {total}
+            </span>
           </CardTitle>
-          <CardDescription>
-            Fleet-wide server health table. Click any server to open full infrastructure details.
+          <CardDescription className="text-zinc-500">
+            Fleet health overview with live utilization and streamlined actions.
           </CardDescription>
-          <div className="relative pt-2 max-w-sm">
+          <div className="relative pt-1.5 max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
             <Input
               value={search}
@@ -132,17 +186,17 @@ export default function InfrastructurePage({ onOpenDetails }: InfrastructurePage
             />
           </div>
         </CardHeader>
-        <CardContent className="px-0 pt-0">
+        <CardContent className="px-0 pt-0 overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow className="border-b border-zinc-100 dark:border-zinc-800">
-                <TableHead className="pl-6">Hostname</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Frequency</TableHead>
-                <TableHead>CPU Utilization %</TableHead>
-                <TableHead>Memory Utilization %</TableHead>
-                <TableHead>Disk Utilization %</TableHead>
-                <TableHead className="pr-6">Actions</TableHead>
+              <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Hostname</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Status</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Frequency</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">CPU</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Memory</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Disk</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -157,56 +211,67 @@ export default function InfrastructurePage({ onOpenDetails }: InfrastructurePage
               ) : (
                 rows.map((row) => {
                   const health = latestHealth[row.agentId];
+                  const displayStatus = deriveDisplayStatus(row, health);
                   return (
-                  <TableRow key={row.agentId} className="cursor-pointer" onClick={() => onOpenDetails(row.agentId)}>
-                    <TableCell className="pl-6 font-medium">{row.hostname}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className={statusClass(row.status)}>{row.status}</Badge>
-                        {health ? (
-                          <>
-                            <Badge variant="outline" className={healthClass(health.healthy)}>
-                              {health.healthy ? 'Healthy' : 'Unhealthy'}
-                            </Badge>
-                            {health.scoreStatus && (
-                              <Badge variant="outline" className={scoreClass(health.scoreStatus)}>
-                                {health.scoreStatus}{health.score == null ? '' : ` ${health.score.toFixed(0)}`}
-                              </Badge>
-                            )}
-                            <span className="text-xs text-zinc-500">
-                              {health.latencyMs == null
-                                ? 'Latency: --'
-                                : `Latency: ${health.latencyMs.toFixed(0)} ms`}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-xs text-zinc-500">Health: --</span>
-                        )}
-                      </div>
+                  <TableRow key={row.agentId} className="border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors">
+                    <TableCell className="py-3 text-center align-middle">
+                      <button
+                        type="button"
+                        onClick={() => onOpenDetails(row.agentId)}
+                        className="font-medium text-zinc-800 dark:text-zinc-100 leading-tight hover:underline"
+                      >
+                        {row.hostname}
+                      </button>
+                      <div className="text-[11px] text-zinc-500 mt-0.5">{row.agentId}</div>
                     </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-1.5"><Gauge className="w-3.5 h-3.5 text-zinc-400" />{row.frequencyGHz.toFixed(2)} GHz</span>
+                    <TableCell className="py-3 text-center align-middle">
+                      <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusClass(displayStatus)} text-[11px] px-2 py-0.5`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(displayStatus)}`} />
+                        {displayStatus}
+                      </Badge>
                     </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-zinc-400" />{row.cpuUsagePct.toFixed(1)}%</span>
+                    <TableCell className="py-3 text-center align-middle">
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 px-2 py-0.5 text-sm text-zinc-700 dark:text-zinc-300">
+                        <Gauge className="w-3 h-3 text-zinc-400" />{row.frequencyGHz.toFixed(2)} GHz
+                      </span>
                     </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-1.5"><MemoryStick className="w-3.5 h-3.5 text-zinc-400" />{row.memoryUsagePct.toFixed(1)}%</span>
+                    <TableCell className="py-2 text-center align-middle">
+                      <CircularUtilization value={row.cpuUsagePct} idKey={`${row.agentId}-cpu`} />
                     </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-1.5"><HardDrive className="w-3.5 h-3.5 text-zinc-400" />{row.diskUsagePct.toFixed(1)}%</span>
+                    <TableCell className="py-2 text-center align-middle">
+                      <CircularUtilization value={row.memoryUsagePct} idKey={`${row.agentId}-mem`} />
                     </TableCell>
-                    <TableCell className="pr-6">
-                      <div className="flex items-center gap-2">
-                        {row.issueSeverity && (
-                          <Badge variant="outline" className={statusClass(row.issueSeverity === 'P1' ? 'Down' : row.issueSeverity === 'P2' ? 'Delayed' : 'Up')}>
-                            {row.issueSeverity} Investigate
-                          </Badge>
-                        )}
-                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); onOpenDetails(row.agentId); }}>
-                          View details
-                        </Button>
-                      </div>
+                    <TableCell className="py-2 text-center align-middle">
+                      <CircularUtilization value={row.diskUsagePct} idKey={`${row.agentId}-disk`} />
+                    </TableCell>
+                    <TableCell className="py-3 text-center align-middle">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Open actions menu"
+                            className="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Settings2 className="w-3.5 h-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDetails(row.agentId); }} className="gap-2">
+                            <Eye className="w-3.5 h-3.5" /> Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenIncidents?.(row.agentId); }} className="gap-2">
+                            <Bug className="w-3.5 h-3.5" /> Incidents
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onPause?.(row.agentId); }} className="gap-2">
+                            <PauseCircle className="w-3.5 h-3.5" /> Pause
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" onClick={(e) => { e.stopPropagation(); onDelete?.(row.agentId); }} className="gap-2">
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                   );
