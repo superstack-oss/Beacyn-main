@@ -6,15 +6,39 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger, SheetClose } from '../../components/ui/sheet';
-import { Plus, Search, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Settings2, Trash2, PenLine, PauseCircle, Flag } from 'lucide-react';
+import { Plus, Search, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Settings, Trash2, PenLine, PauseCircle, Flag } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { apiUrl } from '../../lib/api';
 
+function EmptyState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className="relative w-48 h-28 mb-6 select-none pointer-events-none">
+        <div className="absolute bottom-0 left-4 right-4 h-16 bg-zinc-100 rounded-xl shadow-sm rotate-[-4deg]" />
+        <div className="absolute bottom-2 left-2 right-2 h-16 bg-zinc-50 rounded-xl shadow border border-zinc-100 rotate-[2deg]" />
+        <div className="absolute bottom-4 left-0 right-0 h-16 bg-white rounded-xl shadow border border-zinc-100 flex items-center gap-3 px-4">
+          <div className="w-10 h-8 rounded bg-zinc-100 shrink-0" />
+          <div className="flex flex-col gap-1.5 flex-1">
+            <div className="h-2.5 bg-zinc-200 rounded-full w-3/4" />
+            <div className="h-2 bg-zinc-100 rounded-full w-1/2" />
+            <div className="h-2 bg-zinc-100 rounded-full w-2/3" />
+          </div>
+        </div>
+      </div>
+      <h3 className="text-sm font-semibold text-zinc-700 mb-1">{title}</h3>
+      <p className="text-xs text-zinc-400 text-center max-w-xs">{message}</p>
+    </div>
+  );
+}
+
 const PAGE_SIZE = 10;
 
-export default function InventoryPage() {
+type InventoryScope = 'all' | 'snmp' | 'agent' | 'uptime';
+
+export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScope }) {
   const [inventory, setInventory] = useState<any[]>([]);
   const [search, setSearch] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'user' | 'auto'>('all');
   const [page, setPage] = useState(1);
 
   // Form state
@@ -25,6 +49,7 @@ export default function InventoryPage() {
   const [newPortHost, setNewPortHost] = useState('');
   const [newPort, setNewPort] = useState('');
   const [newEnvironment, setNewEnvironment] = useState('Production');
+  const [newDeviceCategory, setNewDeviceCategory] = useState('servers');
 
   const resetForm = () => {
     setNewItemType('Server');
@@ -34,6 +59,7 @@ export default function InventoryPage() {
     setNewPortHost('');
     setNewPort('');
     setNewEnvironment('Production');
+    setNewDeviceCategory('servers');
   };
 
   const assetTypes: Record<string, string[]> = {
@@ -49,34 +75,98 @@ export default function InventoryPage() {
   };
 
   useEffect(() => {
-    fetch(apiUrl('/api/assets'))
-      .then(res => res.json())
-      .then(data => { if (Array.isArray(data)) setInventory(data); })
-      .catch(err => console.error('Error fetching assets:', err));
-  }, []);
+    const isUptimeAsset = (item: any) => {
+      const explicit = String(item?.device_category || '').toLowerCase();
+      const parent = String(item?.parent_type || '').toLowerCase();
+      return explicit === 'uptime'
+        || parent === 'website'
+        || parent === 'api endpoint'
+        || parent === 'network port'
+        || parent === 'docker host'
+        || parent === 'docker container';
+    };
+
+    const load = async () => {
+      if (scope === 'agent') {
+        const res = await fetch(apiUrl('/api/agents'));
+        const data = await res.json();
+        if (!Array.isArray(data)) return;
+        setInventory(data.map((agent: any) => ({
+          id: agent.id,
+          name: agent.hostname || agent.id,
+          parent_type: 'Agent',
+          sub_type: agent.os || null,
+          target_endpoint: agent.hostname || '-',
+          environment: 'Auto-detected',
+          status: agent.status || 'Unknown',
+          last_checked_at: agent.lastHeartbeatAt || null,
+          source: 'Auto Detected',
+        })));
+        return;
+      }
+
+      if (scope === 'snmp') {
+        const res = await fetch(apiUrl('/api/snmp/devices'));
+        const data = await res.json();
+        if (!Array.isArray(data)) return;
+        setInventory(data.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          parent_type: 'SNMP Device',
+          sub_type: [d.vendor, d.device_type].filter(Boolean).join(' ').trim() || null,
+          target_endpoint: `${d.host}:${d.port}`,
+          environment: 'User Configured',
+          status: d.status || 'Unknown',
+          last_checked_at: d.last_polled_at || null,
+          source: 'User Added',
+        })));
+        return;
+      }
+
+      const res = await fetch(apiUrl('/api/assets'));
+      const data = await res.json();
+      if (!Array.isArray(data)) return;
+      if (scope === 'uptime') {
+        setInventory(data.filter(isUptimeAsset).map((item: any) => ({ ...item, source: 'User Added' })));
+        return;
+      }
+      setInventory(data.map((item: any) => ({ ...item, source: 'User Added' })));
+    };
+
+    load().catch(err => console.error('Error fetching assets:', err));
+  }, [scope]);
+
+  const canAddAsset = scope !== 'agent';
 
   // Filtered + paginated data
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    if (!q) return inventory;
-    return inventory.filter(item =>
-      item.name?.toLowerCase().includes(q) ||
-      item.id?.toLowerCase().includes(q) ||
-      item.parent_type?.toLowerCase().includes(q) ||
-      item.target_endpoint?.toLowerCase().includes(q) ||
-      item.environment?.toLowerCase().includes(q)
-    );
-  }, [inventory, search]);
+    return inventory.filter((item) => {
+      const source = String(item.source || '').toLowerCase();
+      const sourceMatches = sourceFilter === 'all'
+        || (sourceFilter === 'user' && source !== 'auto detected')
+        || (sourceFilter === 'auto' && source === 'auto detected');
+      if (!sourceMatches) return false;
+
+      if (!q) return true;
+      return item.name?.toLowerCase().includes(q)
+        || item.id?.toLowerCase().includes(q)
+        || item.parent_type?.toLowerCase().includes(q)
+        || item.target_endpoint?.toLowerCase().includes(q)
+        || item.environment?.toLowerCase().includes(q)
+        || source.includes(q);
+    });
+  }, [inventory, search, sourceFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset to page 1 when search changes
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); }, [search, sourceFilter]);
 
   // CSV download
   const downloadCSV = () => {
-    const headers = ['Asset ID', 'Name', 'Type', 'Sub-Type', 'Target / Endpoint', 'Environment', 'Status', 'Last Checked'];
+    const headers = ['Asset ID', 'Name', 'Type', 'Sub-Type', 'Target / Endpoint', 'Environment', 'Source', 'Status', 'Last Checked'];
     const rows = filtered.map(item => [
       item.id,
       item.name,
@@ -84,6 +174,7 @@ export default function InventoryPage() {
       item.sub_type || '',
       item.target_endpoint || '',
       item.environment || '',
+      item.source || 'User Added',
       item.status || '',
       item.last_checked_at ? new Date(item.last_checked_at).toLocaleString() : 'Never',
     ]);
@@ -116,15 +207,21 @@ export default function InventoryPage() {
 
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 mb-1">Asset Inventory</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Register and manage all your infrastructure assets and endpoints globally.</p>
-        </div>
+    <div className="relative">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(to_right,#80808014_1px,transparent_1px),linear-gradient(to_bottom,#80808014_1px,transparent_1px)] bg-[size:14px_14px] dark:hidden" />
+      <div className="pointer-events-none absolute inset-0 -z-10 hidden dark:block bg-[linear-gradient(to_right,#ffffff12_1px,transparent_1px),linear-gradient(to_bottom,#ffffff12_1px,transparent_1px)] bg-[size:14px_14px]" />
+      <div className="space-y-6">
+        {/* Header (standalone inventory only) */}
+        {(scope === 'all' || canAddAsset) && (
+          <div className={`flex flex-col sm:flex-row sm:items-center gap-4 ${scope === 'all' ? 'sm:justify-between' : 'sm:justify-end'}`}>
+          {scope === 'all' && (
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 mb-1">Asset Inventory</h1>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Register and manage all your infrastructure assets and endpoints globally.</p>
+            </div>
+          )}
 
-        <Sheet>
+          {canAddAsset && <Sheet>
           <SheetTrigger asChild>
             <Button className="shadow-sm shrink-0">
               <Plus className="w-4 h-4 mr-2" /> Add Asset
@@ -210,6 +307,21 @@ export default function InventoryPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="asset-category">Device Category</Label>
+                <Select value={newDeviceCategory} onValueChange={setNewDeviceCategory}>
+                  <SelectTrigger id="asset-category"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="servers">Servers</SelectItem>
+                    <SelectItem value="vms">VMs</SelectItem>
+                    <SelectItem value="storage">Storage</SelectItem>
+                    <SelectItem value="san">SAN</SelectItem>
+                    <SelectItem value="computer">Computer</SelectItem>
+                    <SelectItem value="uptime">Uptime</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="absolute bottom-0 left-0 right-0 p-4 px-6 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/90 flex justify-end gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
@@ -227,11 +339,18 @@ export default function InventoryPage() {
                     const res = await fetch(apiUrl('/api/assets'), {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ name: newName || 'Unnamed Asset', parent_type: newItemType, sub_type: newSubItemType || null, target_endpoint: target, environment: newEnvironment })
+                      body: JSON.stringify({
+                        name: newName || 'Unnamed Asset',
+                        parent_type: newItemType,
+                        sub_type: newSubItemType || null,
+                        target_endpoint: target,
+                        environment: newEnvironment,
+                        device_category: newDeviceCategory,
+                      })
                     });
                     if (res.ok) {
                       const newAsset = await res.json();
-                      setInventory(prev => [newAsset, ...prev]);
+                      setInventory(prev => [{ ...newAsset, source: 'User Added' }, ...prev]);
                       resetForm();
                     }
                   } catch (err) { console.error('Failed to save asset:', err); }
@@ -239,11 +358,12 @@ export default function InventoryPage() {
               </SheetClose>
             </div>
           </SheetContent>
-        </Sheet>
-      </div>
+        </Sheet>}
+          </div>
+        )}
 
       {/* Main Card */}
-      <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
         <CardHeader className="pb-0 pt-5 px-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
@@ -261,6 +381,16 @@ export default function InventoryPage() {
                   className="pl-8 h-9 w-56 text-sm bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800"
                 />
               </div>
+              <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as 'all' | 'user' | 'auto')}>
+                <SelectTrigger className="h-9 w-[150px] text-sm bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800">
+                  <SelectValue placeholder="Source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sources</SelectItem>
+                  <SelectItem value="user">User Added</SelectItem>
+                  <SelectItem value="auto">Auto Detected</SelectItem>
+                </SelectContent>
+              </Select>
               {/* Download CSV */}
               <Button
                 variant="outline"
@@ -284,14 +414,20 @@ export default function InventoryPage() {
                 <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Type</TableHead>
                 <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Target / Endpoint</TableHead>
                 <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Environment</TableHead>
+                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Source</TableHead>
                 <TableHead className="pr-4 text-right font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginated.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-16 text-zinc-400 text-sm">
-                    {search ? `No assets matching "${search}"` : 'No assets registered yet'}
+                  <TableCell colSpan={7} className="p-0">
+                    <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
+                      <EmptyState
+                        title={search ? 'No matching assets' : 'No assets registered yet'}
+                        message={search ? `No assets match "${search}". Try adjusting your search or filters.` : 'Add your first infrastructure asset to start monitoring.'}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               )}
@@ -314,16 +450,24 @@ export default function InventoryPage() {
                       {item.environment}
                     </span>
                   </TableCell>
+                  <TableCell className="py-4">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-md border text-xs font-medium ${String(item.source || '').toLowerCase() === 'auto detected'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-900'
+                      : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900'
+                    }`}>
+                      {item.source || 'User Added'}
+                    </span>
+                  </TableCell>
                   <TableCell className="py-4 pr-4 text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        <button
+                          type="button"
+                          aria-label="Open asset actions"
+                          className="inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
                         >
-                          <Settings2 className="w-4 h-4" />
-                        </Button>
+                          <Settings className="w-4 h-4" />
+                        </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-44 shadow-md">
                         <DropdownMenuItem className="gap-2 cursor-pointer text-sm">
@@ -394,7 +538,8 @@ export default function InventoryPage() {
             </div>
           </div>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }

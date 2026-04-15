@@ -16,3 +16,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Scripts
+/Users/atanukumarpal/Documents/Devlopment/uptime/src/scripts
+# Local script workspace artifacts
+src/scripts/

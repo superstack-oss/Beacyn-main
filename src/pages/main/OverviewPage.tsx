@@ -93,7 +93,9 @@ export default function OverviewPage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="relative">
+      <div className="absolute inset-0 -z-10 rounded-xl bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:14px_14px] opacity-60" />
+      <div className="space-y-6">
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -248,6 +250,7 @@ export default function OverviewPage() {
             )}
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

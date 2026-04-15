@@ -1,2 +1,0 @@
-HPUX is currently not supported by the Go toolchain for cross-compilation.
-Use a native HP-UX toolchain/runtime approach or a C/C++ based agent for HP-UX.

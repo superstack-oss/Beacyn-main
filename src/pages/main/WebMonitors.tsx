@@ -12,6 +12,27 @@ import MonitorDetails from './MonitorDetails';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { apiUrl } from '../../lib/api';
 
+function EmptyState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className="relative w-48 h-28 mb-6 select-none pointer-events-none">
+        <div className="absolute bottom-0 left-4 right-4 h-16 bg-zinc-100 rounded-xl shadow-sm rotate-[-4deg]" />
+        <div className="absolute bottom-2 left-2 right-2 h-16 bg-zinc-50 rounded-xl shadow border border-zinc-100 rotate-[2deg]" />
+        <div className="absolute bottom-4 left-0 right-0 h-16 bg-white rounded-xl shadow border border-zinc-100 flex items-center gap-3 px-4">
+          <div className="w-10 h-8 rounded bg-zinc-100 shrink-0" />
+          <div className="flex flex-col gap-1.5 flex-1">
+            <div className="h-2.5 bg-zinc-200 rounded-full w-3/4" />
+            <div className="h-2 bg-zinc-100 rounded-full w-1/2" />
+            <div className="h-2 bg-zinc-100 rounded-full w-2/3" />
+          </div>
+        </div>
+      </div>
+      <h3 className="text-sm font-semibold text-zinc-700 mb-1">{title}</h3>
+      <p className="text-xs text-zinc-400 text-center max-w-xs">{message}</p>
+    </div>
+  );
+}
+
 const TinyBarChart = ({ data }: { data: number[] }) => {
   const chartData = data.map((val, i) => ({ name: `T${i}`, value: val }));
   return (
@@ -79,7 +100,7 @@ function useCountUp(target: number, durationMs = 550, reduceMotion = false) {
   return Math.round(value);
 }
 
-export default function WebMonitors() {
+export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime' }) {
   const [endpoints, setEndpoints] = useState<any[]>([]);
   const [selectedMonitor, setSelectedMonitor] = useState<any>(null);
   const [typeFilter, setTypeFilter] = useState('all');
@@ -121,6 +142,17 @@ export default function WebMonitors() {
   const stateOptions = Array.from(new Set(endpoints.map((e) => String(e.environment || 'Unknown'))));
 
   const filtered = endpoints.filter((ep) => {
+    const explicitCategory = String(ep.device_category || '').toLowerCase();
+    const parent = String(ep.parent_type || '').toLowerCase();
+    const isUptimeScoped = explicitCategory === 'uptime'
+      || parent === 'website'
+      || parent === 'api endpoint'
+      || parent === 'network port'
+      || parent === 'docker host'
+      || parent === 'docker container';
+
+    if (scope === 'uptime' && !isUptimeScoped) return false;
+
     const epType = String(ep.parent_type || ep.type || 'Unknown');
     const epStatus = String(ep.status || 'Initializing').toLowerCase();
     const epState = String(ep.environment || 'Unknown');
@@ -152,7 +184,9 @@ export default function WebMonitors() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="relative">
+      <div className="absolute inset-0 -z-10 rounded-xl bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:14px_14px] opacity-60" />
+      <div className="space-y-6">
       {/* Top Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
@@ -161,9 +195,8 @@ export default function WebMonitors() {
           { title: 'PAUSED', count: animatedPaused, color: 'text-amber-500' },
           { title: 'INITIALIZING', count: animatedInit, color: 'text-amber-500' }
         ].map((stat, i) => (
-          <Card key={i} className="relative overflow-hidden bg-white dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 shadow-sm rounded-md h-28">
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:14px_14px] opacity-60"></div>
-            <CardContent className="relative p-5 flex flex-col justify-center h-full">
+          <Card key={i} className="bg-white dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 shadow-sm rounded-md h-28">
+            <CardContent className="p-5 flex flex-col justify-center h-full">
               <div className="text-xs font-semibold text-zinc-500/80 dark:text-zinc-400 tracking-wide mb-1.5">{stat.title}</div>
               <div className={`text-4xl sm:text-5xl font-light tracking-tight transition-colors duration-500 ${stat.color}`}>
                 {stat.count}
@@ -176,39 +209,39 @@ export default function WebMonitors() {
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row justify-between gap-4">
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Select defaultValue="type">
-            <SelectTrigger className="w-[140px] bg-white dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 h-9 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-[140px] bg-gray-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 h-9 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
               <SelectValue placeholder="Type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" onSelect={() => setTypeFilter('all')}>All types</SelectItem>
+              <SelectItem value="all">All types</SelectItem>
               {typeOptions.map((t) => (
-                <SelectItem key={t} value={t} onSelect={() => setTypeFilter(t)}>{t}</SelectItem>
+                <SelectItem key={t} value={t}>{t}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           
-          <Select defaultValue="status">
-            <SelectTrigger className="w-[120px] bg-white dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 h-9 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[120px] bg-gray-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 h-9 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" onSelect={() => setStatusFilter('all')}>All</SelectItem>
-              <SelectItem value="up" onSelect={() => setStatusFilter('up')}>Up</SelectItem>
-              <SelectItem value="down" onSelect={() => setStatusFilter('down')}>Down</SelectItem>
-              <SelectItem value="paused" onSelect={() => setStatusFilter('paused')}>Paused</SelectItem>
-              <SelectItem value="initializing" onSelect={() => setStatusFilter('initializing')}>Initializing</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="up">Up</SelectItem>
+              <SelectItem value="down">Down</SelectItem>
+              <SelectItem value="paused">Paused</SelectItem>
+              <SelectItem value="initializing">Initializing</SelectItem>
             </SelectContent>
           </Select>
 
-          <Select defaultValue="state">
-            <SelectTrigger className="w-[130px] bg-white dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 h-9 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
+          <Select value={stateFilter} onValueChange={setStateFilter}>
+            <SelectTrigger className="w-[130px] bg-gray-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 h-9 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
               <SelectValue placeholder="State" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" onSelect={() => setStateFilter('all')}>All states</SelectItem>
+              <SelectItem value="all">All states</SelectItem>
               {stateOptions.map((s) => (
-                <SelectItem key={s} value={s} onSelect={() => setStateFilter(s)}>{s}</SelectItem>
+                <SelectItem key={s} value={s}>{s}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -219,7 +252,7 @@ export default function WebMonitors() {
           placeholder="Search monitors..." 
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full sm:w-64 bg-white dark:bg-zinc-950 h-9 text-zinc-500"
+          className="w-full sm:w-64 bg-gray-100 dark:bg-zinc-950 h-9 text-zinc-500"
         />
       </div>
 
@@ -236,6 +269,18 @@ export default function WebMonitors() {
             </TableRow>
           </TableHeader>
           <TableBody>
+            {paged.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="p-0">
+                  <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
+                    <EmptyState
+                      title="No monitors found"
+                      message="No monitors match your current filters. Try adjusting the search or filter criteria."
+                    />
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
             {paged.map((ep, i) => (
               <TableRow 
                 key={i} 
@@ -271,14 +316,14 @@ export default function WebMonitors() {
                 <TableCell className="py-4 text-right pr-4">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
+                      <button
+                        type="button"
                         onClick={(e) => e.stopPropagation()}
-                        className="h-8 w-8 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 border-zinc-100 dark:border-zinc-800 shadow-sm bg-white dark:bg-zinc-900"
+                        aria-label="Open monitor actions"
+                        className="inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
                       >
                         <Settings className="w-4 h-4" />
-                      </Button>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-44 shadow-md">
                       <DropdownMenuItem
@@ -355,6 +400,7 @@ export default function WebMonitors() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

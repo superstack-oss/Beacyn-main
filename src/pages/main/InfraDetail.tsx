@@ -9,6 +9,27 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Cpu, HardDrive, Info, MemoryStick, Network, Server, Thermometer, ArrowLeft, ShieldCheck, AlertTriangle, Activity } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 
+function EmptyState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className="relative w-48 h-28 mb-6 select-none pointer-events-none">
+        <div className="absolute bottom-0 left-4 right-4 h-16 bg-zinc-100 rounded-xl shadow-sm rotate-[-4deg]" />
+        <div className="absolute bottom-2 left-2 right-2 h-16 bg-zinc-50 rounded-xl shadow border border-zinc-100 rotate-[2deg]" />
+        <div className="absolute bottom-4 left-0 right-0 h-16 bg-white rounded-xl shadow border border-zinc-100 flex items-center gap-3 px-4">
+          <div className="w-10 h-8 rounded bg-zinc-100 shrink-0" />
+          <div className="flex flex-col gap-1.5 flex-1">
+            <div className="h-2.5 bg-zinc-200 rounded-full w-3/4" />
+            <div className="h-2 bg-zinc-100 rounded-full w-1/2" />
+            <div className="h-2 bg-zinc-100 rounded-full w-2/3" />
+          </div>
+        </div>
+      </div>
+      <h3 className="text-sm font-semibold text-zinc-700 mb-1">{title}</h3>
+      <p className="text-xs text-zinc-400 text-center max-w-xs">{message}</p>
+    </div>
+  );
+}
+
 interface TrendPoint {
   time: string;
   value: number;
@@ -223,10 +244,30 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
     [detail, inodeMount]
   );
 
+  const networkRows = useMemo(
+    () => (detail?.networkInterfaces || []).flatMap((ni) =>
+      (ni.addresses || []).map((a, idx) => ({
+        key: `${ni.name}-${idx}`,
+        name: ni.name,
+        family: a.family,
+        address: a.address,
+        scope: a.internal ? 'Internal' : 'External',
+      }))
+    ),
+    [detail]
+  );
+
   if (!agentId) {
     return (
       <Card className="border-zinc-200 dark:border-zinc-800">
-        <CardContent className="py-14 text-center text-sm text-zinc-500">Select a server from Infrastructure list.</CardContent>
+        <CardContent className="p-0">
+          <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
+            <EmptyState
+              title="No server selected"
+              message="Select a server from the Infrastructure list to view its full details and metrics."
+            />
+          </div>
+        </CardContent>
       </Card>
     );
   }
@@ -242,7 +283,14 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
   if (!detail) {
     return (
       <Card className="border-zinc-200 dark:border-zinc-800">
-        <CardContent className="py-14 text-center text-sm text-zinc-500">Server details unavailable.</CardContent>
+        <CardContent className="p-0">
+          <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
+            <EmptyState
+              title="Server details unavailable"
+              message="Could not load data for this server. It may be offline or the agent may not be reporting."
+            />
+          </div>
+        </CardContent>
       </Card>
     );
   }
@@ -691,13 +739,19 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {detail.networkInterfaces.flatMap((ni) =>
-                  (ni.addresses || []).map((a, idx) => (
-                    <TableRow key={`${ni.name}-${idx}`}>
-                      <TableCell className="font-medium">{ni.name}</TableCell>
-                      <TableCell>{a.family}</TableCell>
-                      <TableCell className="font-mono text-xs max-w-[420px] truncate">{a.address}</TableCell>
-                      <TableCell>{a.internal ? 'Internal' : 'External'}</TableCell>
+                {!networkRows.length ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-sm text-zinc-500 py-6 text-center">
+                      No network interface addresses reported in the latest snapshot.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  networkRows.map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell className="font-medium">{row.name}</TableCell>
+                      <TableCell>{row.family}</TableCell>
+                      <TableCell className="font-mono text-xs max-w-[420px] truncate">{row.address}</TableCell>
+                      <TableCell>{row.scope}</TableCell>
                     </TableRow>
                   ))
                 )}

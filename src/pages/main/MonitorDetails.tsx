@@ -459,14 +459,14 @@ export default function MonitorDetails({ monitor, onBack }: MonitorDetailsProps)
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="text-zinc-600 font-normal" onClick={() => fetchStats(false)}>
+          <Button variant="outline" size="sm" className="text-zinc-600 bg-gray-100 dark:bg-zinc-950 font-normal" onClick={() => fetchStats(false)}>
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
           </Button>
-          <Button variant="outline" size="sm" className="text-zinc-700 font-medium" onClick={runDiagnosticsNow} disabled={runningDiagnostics}>
+          <Button variant="outline" size="sm" className="text-zinc-700 bg-gray-100 dark:bg-zinc-950 font-normal" onClick={runDiagnosticsNow} disabled={runningDiagnostics}>
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${runningDiagnostics ? 'animate-spin' : ''}`} />
             {runningDiagnostics ? 'Running diagnostics...' : 'Run full diagnostics now'}
           </Button>
-          <Button variant="outline" size="sm" className="text-zinc-600 font-normal" onClick={() => setIncidentsOpen(true)}>
+          <Button variant="outline" size="sm" className="text-zinc-600 bg-gray-100 dark:bg-zinc-950 font-normal" onClick={() => setIncidentsOpen(true)}>
             <Bug className="w-4 h-4 mr-2" /> Incidents
           </Button>
         </div>

@@ -3,22 +3,60 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
-import { Search, Server, Gauge, Settings2, Eye, Bug, PauseCircle, Trash2 } from 'lucide-react';
+import { Search, Server, Gauge, Settings, Eye, Bug, PauseCircle, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { apiUrl } from '../../lib/api';
+
+function EmptyState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className="relative w-48 h-28 mb-6 select-none pointer-events-none">
+        <div className="absolute bottom-0 left-4 right-4 h-16 bg-zinc-100 rounded-xl shadow-sm rotate-[-4deg]" />
+        <div className="absolute bottom-2 left-2 right-2 h-16 bg-zinc-50 rounded-xl shadow border border-zinc-100 rotate-[2deg]" />
+        <div className="absolute bottom-4 left-0 right-0 h-16 bg-white rounded-xl shadow border border-zinc-100 flex items-center gap-3 px-4">
+          <div className="w-10 h-8 rounded bg-zinc-100 shrink-0" />
+          <div className="flex flex-col gap-1.5 flex-1">
+            <div className="h-2.5 bg-zinc-200 rounded-full w-3/4" />
+            <div className="h-2 bg-zinc-100 rounded-full w-1/2" />
+            <div className="h-2 bg-zinc-100 rounded-full w-2/3" />
+          </div>
+        </div>
+      </div>
+      <h3 className="text-sm font-semibold text-zinc-700 mb-1">{title}</h3>
+      <p className="text-xs text-zinc-400 text-center max-w-xs">{message}</p>
+    </div>
+  );
+}
 
 interface InfrastructurePageProps {
   onOpenDetails: (agentId: string) => void;
   onOpenIncidents?: (agentId: string) => void;
   onPause?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
+  view?: 'servers' | 'vms' | 'storage' | 'san' | 'computer';
+}
+
+interface AssetListItem {
+  id: string;
+  name: string;
+  parent_type?: string | null;
+  sub_type?: string | null;
+  target_endpoint?: string | null;
+  status?: string | null;
+  environment?: string | null;
+  device_category?: string | null;
+  last_checked_at?: string | null;
 }
 
 interface ServerListItem {
   agentId: string;
+  serialNumber?: string | null;
   hostname: string;
-  status: string;
+  machineType?: string;
+  status: 'Down' | 'Healthy' | 'Warning' | 'Faulty' | string;
+  isStale?: boolean;
+  isAlive?: boolean;
   frequencyGHz: number;
   cpuUsagePct: number;
   memoryUsagePct: number;
@@ -27,40 +65,50 @@ interface ServerListItem {
   issueSeverity?: 'P1' | 'P2' | 'P3' | null;
 }
 
-interface LatestHealthItem {
-  agentId: string;
-  healthy: boolean;
-  score: number | null;
-  scoreStatus: 'Info' | 'Warning' | 'Critical' | null;
-  latencyMs: number | null;
-  checkedAt: string;
-}
-
-function statusClass(status: 'Up' | 'Warning' | 'Down') {
-  if (status === 'Up') return 'border-emerald-200/90 bg-emerald-50/90 text-emerald-700';
+function statusClass(status: 'Healthy' | 'Warning' | 'Down' | 'Faulty') {
+  if (status === 'Healthy') return 'border-emerald-200/90 bg-emerald-50/90 text-emerald-700';
   if (status === 'Warning') return 'border-amber-200/90 bg-amber-50/90 text-amber-700';
+  if (status === 'Faulty') return 'border-fuchsia-200/90 bg-fuchsia-50/90 text-fuchsia-700';
   return 'border-rose-200/90 bg-rose-50/90 text-rose-700';
 }
 
-function statusDotClass(status: 'Up' | 'Warning' | 'Down') {
-  if (status === 'Up') return 'bg-emerald-500';
+function statusDotClass(status: 'Healthy' | 'Warning' | 'Down' | 'Faulty') {
+  if (status === 'Healthy') return 'bg-emerald-500';
   if (status === 'Warning') return 'bg-amber-500';
+  if (status === 'Faulty') return 'bg-fuchsia-500';
   return 'bg-rose-500';
-}
-
-function deriveDisplayStatus(row: ServerListItem, health?: LatestHealthItem): 'Up' | 'Warning' | 'Down' {
-  const maxUtil = Math.max(row.cpuUsagePct || 0, row.memoryUsagePct || 0, row.diskUsagePct || 0);
-  if (row.status === 'Down') return 'Down';
-  if (row.status === 'Delayed') return 'Warning';
-  if (health && !health.healthy) return maxUtil >= 95 ? 'Down' : 'Warning';
-  if (maxUtil >= 90) return 'Warning';
-  return 'Up';
 }
 
 function utilizationPalette(value: number) {
   if (value >= 85) return { from: '#ef4444', to: '#dc2626' };
   if (value >= 60) return { from: '#f59e0b', to: '#d97706' };
   return { from: '#22c55e', to: '#16a34a' };
+}
+
+function normalizeAssetCategory(asset: AssetListItem): 'servers' | 'vms' | 'storage' | 'san' | 'computer' | 'uptime' {
+  const explicit = String(asset.device_category || '').trim().toLowerCase();
+  if (['servers', 'vms', 'storage', 'san', 'computer', 'uptime'].includes(explicit)) {
+    return explicit as 'servers' | 'vms' | 'storage' | 'san' | 'computer' | 'uptime';
+  }
+
+  const parent = String(asset.parent_type || '').toLowerCase();
+  const sub = String(asset.sub_type || '').toLowerCase();
+  const name = String(asset.name || '').toLowerCase();
+
+  if (parent === 'storage') return 'storage';
+  if (parent === 'switch' || sub.includes('brocade') || sub.includes('connextrix')) return 'san';
+  if (parent === 'computer' || sub.includes('apple') || sub.includes('dell') || sub.includes('acer')) return 'computer';
+  if (parent === 'website' || parent === 'api endpoint' || parent === 'network port' || parent === 'docker host' || parent === 'docker container') return 'uptime';
+  if (parent === 'server' && (sub.includes('vm') || name.includes('vm-') || name.startsWith('vm '))) return 'vms';
+  return 'servers';
+}
+
+function infraTitle(view: 'servers' | 'vms' | 'storage' | 'san' | 'computer') {
+  if (view === 'servers') return 'Servers: HP ProLiant, ESXi';
+  if (view === 'vms') return 'VMs';
+  if (view === 'storage') return 'Storage';
+  if (view === 'san') return 'SAN: Brocade';
+  return 'Computer: Apple, HP, Dell, Acer';
 }
 
 function CircularUtilization({ value, idKey }: { value: number; idKey: string }) {
@@ -102,13 +150,15 @@ function CircularUtilization({ value, idKey }: { value: number; idKey: string })
   );
 }
 
-export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onPause, onDelete }: InfrastructurePageProps) {
+export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onPause, onDelete, view = 'servers' }: InfrastructurePageProps) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [rows, setRows] = useState<ServerListItem[]>([]);
-  const [latestHealth, setLatestHealth] = useState<Record<string, LatestHealthItem>>({});
+  const [assetRows, setAssetRows] = useState<AssetListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reloadTick, setReloadTick] = useState(0);
+  const isAgentInfraView = view === 'servers' || view === 'vms';
 
   const pageSize = 25;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -119,36 +169,49 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
     const load = async () => {
       setLoading(true);
       try {
-        const params = new URLSearchParams({
-          page: String(page),
-          pageSize: String(pageSize),
-          q: search,
-        });
+        if (isAgentInfraView) {
+          const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize),
+            q: search,
+          });
+          if (view === 'servers') params.set('machineType', 'physical');
+          if (view === 'vms') params.set('machineType', 'vm');
 
-        const [serversRes, healthRes] = await Promise.all([
-          fetch(apiUrl(`/api/infra/servers?${params.toString()}`)),
-          fetch(apiUrl('/api/health/latest')),
-        ]);
+          const serversRes = await fetch(apiUrl(`/api/infra/servers?${params.toString()}`));
+          const serversData = await serversRes.json();
 
-        const [serversData, healthData] = await Promise.all([
-          serversRes.json(),
-          healthRes.json(),
-        ]);
+          if (!ignore) {
+            setRows(serversData?.servers || []);
+            setTotal(Number(serversData?.total || 0));
+            setAssetRows([]);
+          }
+        } else {
+          const res = await fetch(apiUrl('/api/assets'));
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : [];
+          const filteredByView = list.filter((asset: AssetListItem) => normalizeAssetCategory(asset) === view);
+          const q = String(search || '').trim().toLowerCase();
+          const filtered = q
+            ? filteredByView.filter((asset: AssetListItem) => {
+              const hay = `${asset.name || ''} ${asset.parent_type || ''} ${asset.sub_type || ''} ${asset.target_endpoint || ''} ${asset.id || ''}`.toLowerCase();
+              return hay.includes(q);
+            })
+            : filteredByView;
 
-        const healthMap = Object.fromEntries(
-          ((healthData?.health || []) as LatestHealthItem[]).map((h) => [h.agentId, h])
-        );
-
-        if (!ignore) {
-          setRows(serversData?.servers || []);
-          setTotal(Number(serversData?.total || 0));
-          setLatestHealth(healthMap);
+          const start = (page - 1) * pageSize;
+          const end = start + pageSize;
+          if (!ignore) {
+            setAssetRows(filtered.slice(start, end));
+            setTotal(filtered.length);
+            setRows([]);
+          }
         }
       } catch {
         if (!ignore) {
           setRows([]);
+          setAssetRows([]);
           setTotal(0);
-          setLatestHealth({});
         }
       } finally {
         if (!ignore) setLoading(false);
@@ -161,20 +224,126 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
       ignore = true;
       clearInterval(id);
     };
-  }, [page, search]);
+  }, [isAgentInfraView, page, pageSize, reloadTick, search, view]);
+
+  const handleDelete = async (agentId: string, hostLabel: string) => {
+    const ok = window.confirm(`Delete ${hostLabel}? This will permanently remove this server and all related collected data.`);
+    if (!ok) return;
+
+    try {
+      if (onDelete) {
+        onDelete(agentId);
+      } else {
+        const res = await fetch(apiUrl(`/api/infra/servers/${encodeURIComponent(agentId)}`), { method: 'DELETE' });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `Delete failed (${res.status})`);
+        }
+      }
+      setReloadTick((v) => v + 1);
+    } catch (err: any) {
+      window.alert(err?.message || 'Failed to delete server entry.');
+    }
+  };
+
+  if (!isAgentInfraView) {
+    return (
+      <div className="relative">
+        <div className="absolute inset-0 -z-10 rounded-xl bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:14px_14px] opacity-60" />
+        <div className="space-y-6">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2 text-zinc-800 dark:text-zinc-100">
+              <Server className="w-4 h-4" /> {infraTitle(view)}
+              <span className="inline-flex items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 text-xs text-zinc-500">
+                {total}
+              </span>
+            </CardTitle>
+            <CardDescription className="text-zinc-500">
+              Category-organized infrastructure inventory.
+            </CardDescription>
+            <div className="relative pt-1.5 max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+              <Input
+                value={search}
+                onChange={(e) => { setPage(1); setSearch(e.target.value); }}
+                placeholder="Search devices"
+                className="pl-8"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className="px-0 pt-0 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Name</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Type</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Target</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Status</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Last Checked</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-10 text-center text-sm text-zinc-500">Loading assets...</TableCell>
+                  </TableRow>
+                ) : assetRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="p-0">
+                      <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
+                        <EmptyState
+                          title="No devices in this category"
+                          message="No devices have been registered under this category yet. Add assets from the Inventory page."
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  assetRows.map((row) => (
+                    <TableRow key={row.id} className="border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors">
+                      <TableCell className="py-3 align-middle font-medium text-zinc-800 dark:text-zinc-100">{row.name}</TableCell>
+                      <TableCell className="py-3 align-middle text-zinc-600 dark:text-zinc-300">{row.parent_type}{row.sub_type ? ` (${row.sub_type})` : ''}</TableCell>
+                      <TableCell className="py-3 align-middle text-zinc-600 dark:text-zinc-300">{row.target_endpoint || '-'}</TableCell>
+                      <TableCell className="py-3 align-middle text-zinc-600 dark:text-zinc-300">{row.status || 'Initializing'}</TableCell>
+                      <TableCell className="py-3 align-middle text-zinc-600 dark:text-zinc-300">{row.last_checked_at ? new Date(row.last_checked_at).toLocaleString() : 'Never'}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+
+            <div className="px-6 py-3 flex items-center justify-between text-xs text-zinc-500 border-t border-zinc-100 dark:border-zinc-800">
+              <span>Showing {(page - 1) * pageSize + (assetRows.length ? 1 : 0)} - {(page - 1) * pageSize + assetRows.length} of {total}</span>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
+                <span>Page {page} of {totalPages}</span>
+                <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+              </div>
+            </div>
+          </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+    <div className="relative">
+      <div className="absolute inset-0 -z-10 rounded-xl bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:14px_14px] opacity-60" />
+      <div className="space-y-6">
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2 text-zinc-800 dark:text-zinc-100">
-            <Server className="w-4 h-4" /> Infrastructure monitors
+            <Server className="w-4 h-4" /> {view === 'vms' ? 'Virtual Machine monitors' : 'Infrastructure monitors'}
             <span className="inline-flex items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 text-xs text-zinc-500">
               {total}
             </span>
           </CardTitle>
           <CardDescription className="text-zinc-500">
-            Fleet health overview with live utilization and streamlined actions.
+            {view === 'vms'
+              ? 'Fleet health overview for virtual machines with live utilization.'
+              : 'Fleet health overview with live utilization and streamlined actions.'}
           </CardDescription>
           <div className="relative pt-1.5 max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
@@ -191,6 +360,7 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
             <TableHeader>
               <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Hostname</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Machine Type</TableHead>
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Status</TableHead>
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Frequency</TableHead>
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">CPU</TableHead>
@@ -202,18 +372,27 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-sm text-zinc-500">Loading infrastructure servers...</TableCell>
+                  <TableCell colSpan={8} className="py-10 text-center text-sm text-zinc-500">Loading infrastructure servers...</TableCell>
                 </TableRow>
               ) : rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-sm text-zinc-500">No servers found.</TableCell>
+                  <TableCell colSpan={8} className="p-0">
+                    <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
+                      <EmptyState
+                        title="No servers found"
+                        message="No infrastructure servers are reporting in. Deploy the agent on your servers to start monitoring."
+                      />
+                    </div>
+                  </TableCell>
                 </TableRow>
               ) : (
                 rows.map((row) => {
-                  const health = latestHealth[row.agentId];
-                  const displayStatus = deriveDisplayStatus(row, health);
+                  const displayStatus = (['Down', 'Healthy', 'Warning', 'Faulty'].includes(String(row.status))
+                    ? row.status
+                    : 'Down') as 'Down' | 'Healthy' | 'Warning' | 'Faulty';
+                  const machineType = String(row.machineType || (view === 'vms' ? 'VM' : 'Physical')).toLowerCase() === 'vm' ? 'VM' : 'Physical';
                   return (
-                  <TableRow key={row.agentId} className="border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors">
+                  <TableRow key={row.agentId} className={`border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors ${row.isStale ? 'opacity-55 grayscale' : ''}`}>
                     <TableCell className="py-3 text-center align-middle">
                       <button
                         type="button"
@@ -222,7 +401,14 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
                       >
                         {row.hostname}
                       </button>
-                      <div className="text-[11px] text-zinc-500 mt-0.5">{row.agentId}</div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5">S/N: {row.serialNumber || 'Unavailable'}</div>
+                    </TableCell>
+                    <TableCell className="py-3 text-center align-middle">
+                      <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${machineType === 'VM'
+                        ? 'border-violet-200/90 bg-violet-50/90 text-violet-700 dark:border-violet-800/90 dark:bg-violet-950/40 dark:text-violet-300'
+                        : 'border-sky-200/90 bg-sky-50/90 text-sky-700 dark:border-sky-800/90 dark:bg-sky-950/40 dark:text-sky-300'} `}>
+                        {machineType}
+                      </span>
                     </TableCell>
                     <TableCell className="py-3 text-center align-middle">
                       <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusClass(displayStatus)} text-[11px] px-2 py-0.5`}>
@@ -253,7 +439,7 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
                             className="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <Settings2 className="w-3.5 h-3.5" />
+                            <Settings className="w-3.5 h-3.5" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-44">
@@ -267,7 +453,7 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
                             <PauseCircle className="w-3.5 h-3.5" /> Pause
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem variant="destructive" onClick={(e) => { e.stopPropagation(); onDelete?.(row.agentId); }} className="gap-2">
+                          <DropdownMenuItem variant="destructive" onClick={(e) => { e.stopPropagation(); void handleDelete(row.agentId, row.hostname); }} className="gap-2">
                             <Trash2 className="w-3.5 h-3.5" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -289,7 +475,8 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
             </div>
           </div>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }

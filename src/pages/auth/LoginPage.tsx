@@ -40,13 +40,14 @@ export default function LoginPage({ onLogin }: Props) {
       <AuthHeader isDark={isDark} toggleTheme={() => setIsDark(!isDark)} />
       
       <main className="flex-1 flex items-center justify-center p-4 w-full">
-        <div className="w-full max-w-[420px]">
+        {/* Form content */}
+        <div className={`w-full ${view === 'request' ? 'max-w-[560px]' : 'max-w-[420px]'} relative`}>
           {view === 'login' && <LoginForm setView={setView} onLogin={onLogin} />}
           {view === 'reset' && <ResetPasswordForm setView={setView} />}
           {view === 'request' && <RequestAccessForm setView={setView} />}
         </div>
       </main>
-      
+
       <AuthFooter />
     </div>
   );
