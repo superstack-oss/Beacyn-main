@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Button } from '../../components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../../components/ui/sheet';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Cpu, HardDrive, Info, MemoryStick, Network, Server, Thermometer, ArrowLeft, ShieldCheck, AlertTriangle, Activity } from 'lucide-react';
+import { Cpu, HardDrive, Info, MemoryStick, Network, Server, Thermometer, ArrowLeft, ShieldCheck, AlertTriangle, Activity, Layers3, Microchip, ScanSearch, Binary } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 
 function EmptyState({ title, message }: { title: string; message: string }) {
@@ -42,20 +42,49 @@ interface DiskMount {
   usedBytes: number;
   availBytes: number;
   sizeBytes: number;
+  readBytes?: number;
+  writeBytes?: number;
+  healthStatus?: string | null;
+  smartSummary?: string | null;
 }
 
 interface InodeMount {
   mountpoint: string;
   filesystem: string;
   usedPct: number;
-  used: number;
-  free: number;
+  used: number | null;
+  free: number | null;
   inodes: number | null;
 }
 
 interface NetworkInterface {
   name: string;
   addresses: Array<{ family: string; address: string; internal: boolean }>;
+  macAddress?: string | null;
+  mtu?: number | null;
+  bytesSent?: number;
+  bytesRecv?: number;
+  packetsSent?: number;
+  packetsRecv?: number;
+  errorsIn?: number;
+  errorsOut?: number;
+  dropIn?: number;
+  dropOut?: number;
+}
+
+interface DockerContainer {
+  id: string;
+  name: string;
+  image: string | null;
+  state: string | null;
+  status: string | null;
+  cpuPercent: number | null;
+  memoryPercent: number | null;
+  netRxBytes: number;
+  netTxBytes: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
+  pids: number | null;
 }
 
 interface ServerDetail {
@@ -68,12 +97,26 @@ interface ServerDetail {
     uptimeSeconds: number;
     collectedAt: string;
     status: string;
+    agentName?: string | null;
+    serialNumber?: string | null;
+    kernelVersion?: string | null;
+    architecture?: string | null;
+    virtualizationType?: string | null;
+    machineType?: string | null;
+    firstSeenAt?: string | null;
+    lastSeenAt?: string | null;
   };
   performance: {
     cpuUsagePct: number;
     memoryUsagePct: number;
     networkUsagePct: number;
     diskUsagePct: number;
+    latencyMs?: number | null;
+    throughputMbps?: number | null;
+    bandwidthMbps?: number | null;
+    iops?: number | null;
+    diskReadThroughputMBps?: number | null;
+    diskWriteThroughputMBps?: number | null;
   };
   cpu: {
     load: number[];
@@ -105,8 +148,8 @@ interface ServerDetail {
     metric_type: string;
     resource_key: string;
     severity: 'P1' | 'P2' | 'P3';
-    current_value: number;
-    threshold_value: number;
+    current_value: number | null;
+    threshold_value: number | null;
     description: string;
   }>;
   health?: {
@@ -133,6 +176,22 @@ interface ServerDetail {
     rxMbps: number | null;
     txMbps: number | null;
   }>;
+  performanceTrend?: Array<{
+    time: string;
+    latencyMs: number | null;
+    throughputMbps: number | null;
+    bandwidthMbps: number | null;
+    iops: number | null;
+    diskUsagePct: number | null;
+  }>;
+  docker?: {
+    enabled: boolean;
+    total: number;
+    running: number;
+    error: string | null;
+    statusText: string;
+    containers: DockerContainer[];
+  } | null;
 }
 
 interface InfraDetailProps {
@@ -158,9 +217,70 @@ function formatUptime(seconds: number): string {
   return `${mins}m`;
 }
 
+function formatMetric(value: number | null | undefined, unit: string, digits = 2): string {
+  if (value == null || !Number.isFinite(value)) return 'Not Available';
+  return `${value.toFixed(digits)} ${unit}`;
+}
+
+function hasChartData(data: Array<Record<string, any>> | undefined, key = 'value') {
+  return Array.isArray(data) && data.some((point) => typeof point?.[key] === 'number' && Number.isFinite(point[key]));
+}
+
+function ChartPlaceholder({ message = 'Data Not Available', compact = false }: { message?: string; compact?: boolean }) {
+  return (
+    <div className={`flex items-center justify-center rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-900/20 text-zinc-400 ${compact ? 'h-[84px]' : 'h-[220px]'}`}>
+      <span className="text-sm">{message}</span>
+    </div>
+  );
+}
+
+function MetricChartCard({
+  title,
+  value,
+  data,
+  color,
+  dataKey = 'value',
+}: {
+  title: string;
+  value: string;
+  data: Array<Record<string, any>>;
+  color: string;
+  dataKey?: string;
+}) {
+  return (
+    <Card className="min-w-0 border-zinc-200 dark:border-zinc-800">
+      <CardContent className="pt-5 min-w-0">
+        <p className="text-xs uppercase tracking-wider text-zinc-500">{title}</p>
+        <p className="text-2xl font-bold mt-1">{value}</p>
+        <div className="mt-3 h-[84px] w-full min-w-0">
+          {hasChartData(data, dataKey) ? (
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={80}>
+              <AreaChart data={data}>
+                <defs>
+                  <linearGradient id={`mini-${title.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={color} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3f3f46" opacity={0.15} />
+                <XAxis dataKey="time" hide />
+                <YAxis hide />
+                <Tooltip />
+                <Area type="monotone" dataKey={dataKey} stroke={color} fillOpacity={1} fill={`url(#mini-${title.replace(/\s+/g, '-')})`} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <ChartPlaceholder compact />
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function statusClass(status: string) {
-  if (status === 'Up') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (status === 'Delayed') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (status === 'Online' || status === 'Up' || status === 'Healthy') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (status === 'Delayed' || status === 'Warning') return 'bg-amber-50 text-amber-700 border-amber-200';
   return 'bg-rose-50 text-rose-700 border-rose-200';
 }
 
@@ -195,6 +315,227 @@ function summarizeMetrics(metrics: Record<string, any> | undefined) {
   return parts.join(' | ');
 }
 
+function toSafeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace('%', '').trim());
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = toSafeNumber(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTrend(points: any): TrendPoint[] {
+  return Array.isArray(points)
+    ? points.map((point: any) => ({
+        time: String(point?.time || ''),
+        value: toSafeNumber(point?.value, 0),
+      }))
+    : [];
+}
+
+function normalizeDetailResponse(raw: any): ServerDetail {
+  const host = raw?.host || raw || {};
+  const performance = raw?.performance || {};
+  const cpu = raw?.cpu || {};
+  const memory = raw?.memory || {};
+  const issues = Array.isArray(raw?.issues) ? raw.issues : [];
+  const diskMounts = Array.isArray(raw?.diskMounts) ? raw.diskMounts : [];
+  const inodeMounts = Array.isArray(raw?.inodeMounts) ? raw.inodeMounts : [];
+  const networkInterfaces = Array.isArray(raw?.networkInterfaces) ? raw.networkInterfaces : [];
+  const health = raw?.health && typeof raw.health === 'object' ? raw.health : null;
+  const heartbeat = host?.heartbeat ?? raw?.heartbeat ?? null;
+  const heartbeatActive = String(heartbeat || '').toLowerCase() === 'active';
+  const rawStatus = String(host?.status || raw?.status || 'Down');
+  const normalizedStatus = heartbeatActive ? 'Online' : rawStatus === 'Up' ? 'Online' : rawStatus;
+
+  return {
+    agentId: String(raw?.agentId || raw?.agent_id || ''),
+    host: {
+      hostname: String(host?.hostname || raw?.hostname || 'Unknown host'),
+      platform: String(host?.platform || raw?.platform || 'Unknown'),
+      os: String(host?.os || raw?.os || host?.platform || 'Unknown'),
+      osVersion: String(host?.osVersion || raw?.osVersion || raw?.platform_version || 'Unknown'),
+      uptimeSeconds: toSafeNumber(host?.uptimeSeconds ?? raw?.uptimeSeconds, 0),
+      collectedAt: String(host?.collectedAt || raw?.captured_at || new Date().toISOString()),
+      status: normalizedStatus,
+      agentName: host?.agentName ? String(host.agentName) : null,
+      serialNumber: host?.serialNumber ? String(host.serialNumber) : null,
+      kernelVersion: host?.kernelVersion ? String(host.kernelVersion) : null,
+      architecture: host?.architecture ? String(host.architecture) : null,
+      virtualizationType: host?.virtualizationType ? String(host.virtualizationType) : null,
+      machineType: host?.machineType ? String(host.machineType) : null,
+      firstSeenAt: host?.firstSeenAt ? String(host.firstSeenAt) : null,
+      lastSeenAt: host?.lastSeenAt ? String(host.lastSeenAt) : null,
+    },
+    performance: {
+      cpuUsagePct: toSafeNumber(performance?.cpuUsagePct ?? performance?.cpu_usage_percent ?? raw?.cpuUsagePct, 0),
+      memoryUsagePct: toSafeNumber(performance?.memoryUsagePct ?? performance?.memory_used_percent ?? raw?.memoryUsagePct, 0),
+      networkUsagePct: toSafeNumber(performance?.networkUsagePct ?? performance?.network_usage_percent ?? raw?.networkUsagePct, 0),
+      diskUsagePct: toSafeNumber(performance?.diskUsagePct ?? performance?.disk_used_percent ?? raw?.diskUsagePct, 0),
+      latencyMs: toNullableNumber(performance?.latencyMs),
+      throughputMbps: toNullableNumber(performance?.throughputMbps),
+      bandwidthMbps: toNullableNumber(performance?.bandwidthMbps),
+      iops: toNullableNumber(performance?.iops),
+      diskReadThroughputMBps: toNullableNumber(performance?.diskReadThroughputMBps),
+      diskWriteThroughputMBps: toNullableNumber(performance?.diskWriteThroughputMBps),
+    },
+    cpu: {
+      load: Array.isArray(cpu?.load) ? cpu.load.map((value: any) => toSafeNumber(value, 0)) : [],
+      cores: toSafeNumber(cpu?.cores ?? cpu?.logicalCores, 0),
+      physicalCores: toSafeNumber(cpu?.physicalCores ?? cpu?.cores, 0),
+      logicalCores: toSafeNumber(cpu?.logicalCores ?? cpu?.cores, 0),
+      usagePct: toSafeNumber(cpu?.usagePct ?? cpu?.usagePercent, 0),
+      frequencyMHz: toNullableNumber(cpu?.frequencyMHz),
+      temperatureC: toNullableNumber(cpu?.temperatureC),
+    },
+    memory: {
+      total: toSafeNumber(memory?.total ?? memory?.totalBytes, 0),
+      used: toSafeNumber(memory?.used ?? memory?.usedBytes, 0),
+      free: toSafeNumber(memory?.free ?? memory?.availableBytes, 0),
+      usedPct: toSafeNumber(memory?.usedPct ?? memory?.usedPercent, 0),
+      swapTotal: toSafeNumber(memory?.swapTotal ?? memory?.swapTotalBytes, 0),
+      swapUsed: toSafeNumber(memory?.swapUsed ?? memory?.swapUsedBytes, 0),
+      swapFree: toSafeNumber(memory?.swapFree, 0),
+      swapUsedPct: toSafeNumber(memory?.swapUsedPct ?? memory?.swapUsedPercent, 0),
+    },
+    cpuTrend: normalizeTrend(raw?.cpuTrend),
+    memoryTrend: normalizeTrend(raw?.memoryTrend),
+    networkTrend: normalizeTrend(raw?.networkTrend),
+    diskMounts: diskMounts.map((item: any) => ({
+      mountpoint: String(item?.mountpoint || 'unknown'),
+      filesystem: String(item?.filesystem || item?.fs_type || 'unknown'),
+      usedPct: toSafeNumber(item?.usedPct ?? item?.used_percent ?? item?.usedPercent, 0),
+      usedBytes: toSafeNumber(item?.usedBytes ?? item?.used_bytes, 0),
+      availBytes: toSafeNumber(item?.availBytes ?? item?.avail_bytes ?? item?.free_bytes, 0),
+      sizeBytes: toSafeNumber(item?.sizeBytes ?? item?.size_bytes ?? item?.total_bytes, 0),
+      readBytes: toSafeNumber(item?.readBytes ?? item?.read_bytes, 0),
+      writeBytes: toSafeNumber(item?.writeBytes ?? item?.write_bytes, 0),
+      healthStatus: item?.healthStatus ? String(item.healthStatus) : (item?.health_status ? String(item.health_status) : null),
+      smartSummary: item?.smartSummary ? String(item.smartSummary) : (item?.smart_summary ? String(item.smart_summary) : null),
+    })),
+    inodeMounts: inodeMounts.map((item: any) => ({
+      mountpoint: String(item?.mountpoint || 'unknown'),
+      filesystem: String(item?.filesystem || item?.fs_type || 'unknown'),
+      usedPct: toSafeNumber(item?.usedPct ?? item?.used_percent ?? item?.inode_used_percent, 0),
+      used: toNullableNumber(item?.used),
+      free: toNullableNumber(item?.free),
+      inodes: toNullableNumber(item?.inodes),
+    })),
+    networkInterfaces: networkInterfaces.map((item: any) => ({
+      name: String(item?.name || item?.interface_name || 'unknown'),
+      macAddress: item?.macAddress ? String(item.macAddress) : (item?.mac_address ? String(item.mac_address) : null),
+      mtu: toNullableNumber(item?.mtu),
+      bytesSent: toSafeNumber(item?.bytesSent ?? item?.bytes_sent, 0),
+      bytesRecv: toSafeNumber(item?.bytesRecv ?? item?.bytes_recv, 0),
+      packetsSent: toSafeNumber(item?.packetsSent ?? item?.packets_sent, 0),
+      packetsRecv: toSafeNumber(item?.packetsRecv ?? item?.packets_recv, 0),
+      errorsIn: toSafeNumber(item?.errorsIn ?? item?.errors_in, 0),
+      errorsOut: toSafeNumber(item?.errorsOut ?? item?.errors_out, 0),
+      dropIn: toSafeNumber(item?.dropIn ?? item?.drop_in, 0),
+      dropOut: toSafeNumber(item?.dropOut ?? item?.drop_out, 0),
+      addresses: Array.isArray(item?.addresses)
+        ? item.addresses.map((address: any) => ({
+            family: String(address?.family || (String(address?.address || address).includes(':') ? 'IPv6' : 'IPv4')),
+            address: String(address?.address || address || ''),
+            internal: Boolean(address?.internal),
+          }))
+        : [],
+    })),
+    issues: (() => {
+      const seen = new Set<string>();
+      return issues
+        .map((issue: any, index: number) => {
+          const severityRaw = String(issue?.severity || '').toUpperCase();
+          const severity = severityRaw === 'CRITICAL' ? 'P1' : severityRaw === 'WARNING' ? 'P2' : (severityRaw === 'P1' || severityRaw === 'P2' || severityRaw === 'P3' ? severityRaw : 'P3');
+          return {
+            ticket_id: String(issue?.ticket_id || issue?.ticketId || `HE-${index + 1}`),
+            metric_type: String(issue?.metric_type || issue?.metricType || issue?.check_name || 'health'),
+            resource_key: String(issue?.resource_key || issue?.resourceKey || 'system'),
+            severity: severity as 'P1' | 'P2' | 'P3',
+            current_value: toNullableNumber(issue?.current_value ?? issue?.currentValue),
+            threshold_value: toNullableNumber(issue?.threshold_value ?? issue?.thresholdValue),
+            description: String(issue?.description || issue?.message || ''),
+          };
+        })
+        .filter((issue: { severity: string; metric_type: string; resource_key: string; description: string }) => {
+          const key = `${issue.severity}|${issue.metric_type}|${issue.resource_key}|${issue.description}`.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    })(),
+    health: health
+      ? {
+          serverHealthy: Boolean(health?.serverHealthy),
+          score: toNullableNumber(health?.score),
+          scoreStatus: health?.scoreStatus === 'Info' || health?.scoreStatus === 'Warning' || health?.scoreStatus === 'Critical' ? health.scoreStatus : null,
+          majorIssueReasons: Array.isArray(health?.majorIssueReasons) ? health.majorIssueReasons.map(String) : [],
+          scoringComponents: health?.scoringComponents && typeof health.scoringComponents === 'object' ? health.scoringComponents : {},
+          cpuUsagePct: toNullableNumber(health?.cpuUsagePct),
+          memoryUsagePct: toNullableNumber(health?.memoryUsagePct),
+          cpuTemperatureC: toNullableNumber(health?.cpuTemperatureC),
+          networkLatencyMs: toNullableNumber(health?.networkLatencyMs),
+          networkDownloadMbps: toNullableNumber(health?.networkDownloadMbps),
+          networkRxMbps: toNullableNumber(health?.networkRxMbps),
+          networkTxMbps: toNullableNumber(health?.networkTxMbps),
+          failedServicesCount: toSafeNumber(health?.failedServicesCount, 0),
+          hungProcessCount: toSafeNumber(health?.hungProcessCount, 0),
+          checkedAt: String(health?.checkedAt || ''),
+        }
+      : null,
+    healthTrend: Array.isArray(raw?.healthTrend)
+      ? raw.healthTrend.map((point: any) => ({
+          time: String(point?.time || ''),
+          latencyMs: toNullableNumber(point?.latencyMs),
+          downloadMbps: toNullableNumber(point?.downloadMbps),
+          rxMbps: toNullableNumber(point?.rxMbps),
+          txMbps: toNullableNumber(point?.txMbps),
+        }))
+      : [],
+    performanceTrend: Array.isArray(raw?.performanceTrend)
+      ? raw.performanceTrend.map((point: any) => ({
+          time: String(point?.time || ''),
+          latencyMs: toNullableNumber(point?.latencyMs),
+          throughputMbps: toNullableNumber(point?.throughputMbps),
+          bandwidthMbps: toNullableNumber(point?.bandwidthMbps),
+          iops: toNullableNumber(point?.iops),
+          diskUsagePct: toNullableNumber(point?.diskUsagePct),
+        }))
+      : [],
+    docker: raw?.docker && typeof raw.docker === 'object'
+      ? {
+          enabled: Boolean(raw.docker.enabled),
+          total: toSafeNumber(raw.docker.total, 0),
+          running: toSafeNumber(raw.docker.running, 0),
+          error: raw.docker.error ? String(raw.docker.error) : null,
+          statusText: String(raw.docker.statusText || raw.docker.error || 'Docker not running or Not Available'),
+          containers: Array.isArray(raw.docker.containers)
+            ? raw.docker.containers.map((container: any, index: number) => ({
+                id: String(container?.id || container?.container_identifier || index),
+                name: String(container?.name || container?.container_name || 'container'),
+                image: container?.image ? String(container.image) : (container?.image_name ? String(container.image_name) : null),
+                state: container?.state ? String(container.state) : (container?.state_name ? String(container.state_name) : null),
+                status: container?.status ? String(container.status) : (container?.status_text ? String(container.status_text) : null),
+                cpuPercent: toNullableNumber(container?.cpuPercent ?? container?.cpu_percent),
+                memoryPercent: toNullableNumber(container?.memoryPercent ?? container?.memory_percent),
+                netRxBytes: toSafeNumber(container?.netRxBytes ?? container?.net_rx_bytes, 0),
+                netTxBytes: toSafeNumber(container?.netTxBytes ?? container?.net_tx_bytes, 0),
+                blockReadBytes: toSafeNumber(container?.blockReadBytes ?? container?.block_read_bytes, 0),
+                blockWriteBytes: toSafeNumber(container?.blockWriteBytes ?? container?.block_write_bytes, 0),
+                pids: toNullableNumber(container?.pids),
+              }))
+            : [],
+        }
+      : null,
+  };
+}
+
 export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
   const [detail, setDetail] = useState<ServerDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -213,7 +554,7 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
       try {
         const res = await fetch(apiUrl(`/api/infra/servers/${encodeURIComponent(agentId)}?limit=72`));
         if (!res.ok) throw new Error('details unavailable');
-        const data: ServerDetail = await res.json();
+        const data = normalizeDetailResponse(await res.json());
         if (!ignore) {
           setDetail(data);
           setDiskMount((prev) => data.diskMounts.some((d) => d.mountpoint === prev) ? prev : (data.diskMounts[0]?.mountpoint || '/'));
@@ -257,6 +598,17 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
     [detail]
   );
 
+  const performanceSeries = useMemo(() => {
+    const rows = detail?.performanceTrend || [];
+    return {
+      latency: rows.map((point) => ({ time: point.time, value: point.latencyMs })),
+      throughput: rows.map((point) => ({ time: point.time, value: point.throughputMbps })),
+      bandwidth: rows.map((point) => ({ time: point.time, value: point.bandwidthMbps })),
+      iops: rows.map((point) => ({ time: point.time, value: point.iops })),
+      disk: rows.map((point) => ({ time: point.time, value: point.diskUsagePct })),
+    };
+  }, [detail]);
+
   if (!agentId) {
     return (
       <Card className="border-zinc-200 dark:border-zinc-800">
@@ -297,25 +649,35 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        {onBack && (
-          <Button variant="outline" size="sm" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back to servers
-          </Button>
-        )}
-        <Badge variant="outline" className={statusClass(detail.host.status)}>
-          Status: {detail.host.status}
-        </Badge>
+      <div className="rounded-2xl border border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950/70  p-4 md:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" /> Back to servers
+              </button>
+            )}
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{detail.host.hostname}</h1>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Infrastructure detail view with live system, network, disk, and Docker telemetry.</p>
+            </div>
+          </div>
+          <Badge variant="outline" className={`${statusClass(detail.host.status)} px-3 py-1 text-xs font-semibold`}>
+            Status: {detail.host.status}
+          </Badge>
+        </div>
       </div>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">1. Health Check Snapshot</p>
-
-      <Card className="border-zinc-200 dark:border-zinc-800">
+      <Card className="border-zinc-200/80 dark:border-zinc-800 shadow-sm bg-white/90 dark:bg-zinc-950/60">
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-lg">Health Check Snapshot</CardTitle>
+            <CardTitle className="text-lg">Health Snapshot</CardTitle>
             <CardDescription>
-              Latest health-check execution for this host.
+              Latest health and operational posture for this server.
             </CardDescription>
           </div>
           <Sheet>
@@ -326,9 +688,9 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
             </SheetTrigger>
             <SheetContent side="right" className="w-full sm:max-w-2xl p-0">
               <SheetHeader className="border-b border-zinc-200 dark:border-zinc-800">
-                <SheetTitle>Health Check Parameters</SheetTitle>
+                <SheetTitle>Health Check Parameters And DB Signals</SheetTitle>
                 <SheetDescription>
-                  Component-wise checks and latest performance result for this server.
+                  Component-wise checks and latest stored metrics for this server.
                 </SheetDescription>
               </SheetHeader>
               <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-88px)]">
@@ -441,7 +803,7 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                   <div className="mt-2 space-y-1.5">
                     <p><span className="text-zinc-500">Failed services:</span> <span className="font-semibold">{detail.health.failedServicesCount}</span></p>
                     <p><span className="text-zinc-500">Hung jobs:</span> <span className="font-semibold">{detail.health.hungProcessCount}</span></p>
-                    <p><span className="text-zinc-500">Checked at:</span> <span className="font-semibold">{new Date(detail.health.checkedAt).toLocaleString('en-GB')}</span></p>
+                    <p><span className="text-zinc-500">Checked at:</span> <span className="font-semibold">{detail.health.checkedAt ? new Date(detail.health.checkedAt).toLocaleString('en-GB') : 'N/A'}</span></p>
                   </div>
                 </div>
               </div>
@@ -450,83 +812,76 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
         </CardContent>
       </Card>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">2. System Details</p>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="border-zinc-200 dark:border-zinc-800">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2"><Info className="w-4 h-4" /> OS Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p><span className="text-zinc-500">OS:</span> {detail.host.os}</p>
-            <p><span className="text-zinc-500">Version:</span> {detail.host.osVersion}</p>
-            <p><span className="text-zinc-500">Platform:</span> {detail.host.platform}</p>
-            <p><span className="text-zinc-500">Updated:</span> {new Date(detail.host.collectedAt).toLocaleString('en-GB')}</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-zinc-200 dark:border-zinc-800">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2"><Server className="w-4 h-4" /> Host Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p><span className="text-zinc-500">Hostname:</span> {detail.host.hostname}</p>
-            <p><span className="text-zinc-500">Agent ID:</span> {detail.agentId}</p>
-            <p><span className="text-zinc-500">Uptime:</span> {formatUptime(detail.host.uptimeSeconds)}</p>
-            <p><span className="text-zinc-500">Since last reboot:</span> {formatUptime(detail.host.uptimeSeconds)}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <p className="text-xs uppercase tracking-wider text-zinc-500">3. System Configuration</p>
-
-      <Card className="border-zinc-200 dark:border-zinc-800">
-        <CardHeader>
+      <Card className="border-zinc-200/80 dark:border-zinc-800 shadow-sm bg-white/90 dark:bg-zinc-950/60">
+        <CardHeader className="pb-3">
           <CardTitle className="text-lg">System Configuration</CardTitle>
-          <CardDescription>Hardware and host configuration from latest snapshot.</CardDescription>
+          <CardDescription>Compact host, OS, and hardware details from the latest snapshot.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3 lg:grid-cols-4 text-sm">
-          <div><p className="text-zinc-500">Physical CPU</p><p className="text-base font-semibold">{detail.cpu.physicalCores || 'N/A'} cores</p></div>
-          <div><p className="text-zinc-500">Logical CPU</p><p className="text-base font-semibold">{detail.cpu.logicalCores || detail.cpu.cores || 'N/A'} cores</p></div>
-          <div><p className="text-zinc-500">CPU Frequency</p><p className="text-base font-semibold">{detail.cpu.frequencyMHz ? `${(detail.cpu.frequencyMHz / 1000).toFixed(2)} GHz` : 'N/A'}</p></div>
-          <div><p className="text-zinc-500">RAM</p><p className="text-base font-semibold">{formatBytes(detail.memory.total)}</p></div>
-          <div><p className="text-zinc-500">Swap</p><p className="text-base font-semibold">{formatBytes(detail.memory.swapTotal)}</p></div>
-          <div><p className="text-zinc-500">Serial Number</p><p className="text-base font-semibold">Not reported</p></div>
-          <div><p className="text-zinc-500">Platform</p><p className="text-base font-semibold">{detail.host.platform}</p></div>
-          <div><p className="text-zinc-500">OS Build</p><p className="text-base font-semibold">{detail.host.osVersion || 'N/A'}</p></div>
+        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 text-sm">
+          {[
+            { label: 'Hostname', value: detail.host.hostname || 'N/A', icon: Server },
+            { label: 'Agent Name', value: detail.host.agentName || 'N/A', icon: Info },
+            { label: 'OS', value: detail.host.os || 'N/A', icon: Info },
+            { label: 'OS Build', value: detail.host.osVersion || 'N/A', icon: Binary },
+            { label: 'Platform', value: detail.host.platform || 'N/A', icon: Layers3 },
+            { label: 'Uptime', value: formatUptime(detail.host.uptimeSeconds), icon: Activity },
+            { label: 'Last Seen', value: detail.host.lastSeenAt ? new Date(detail.host.lastSeenAt).toLocaleString('en-GB') : 'N/A', icon: ScanSearch },
+            { label: 'Updated', value: detail.host.collectedAt ? new Date(detail.host.collectedAt).toLocaleString('en-GB') : 'N/A', icon: ScanSearch },
+            { label: 'Physical CPU', value: `${detail.cpu.physicalCores || 'N/A'} cores`, icon: Cpu },
+            { label: 'Logical CPU', value: `${detail.cpu.logicalCores || detail.cpu.cores || 'N/A'} cores`, icon: Microchip },
+            { label: 'CPU Frequency', value: detail.cpu.frequencyMHz ? `${(detail.cpu.frequencyMHz / 1000).toFixed(2)} GHz` : 'N/A', icon: Activity },
+            { label: 'RAM', value: formatBytes(detail.memory.total), icon: MemoryStick },
+            { label: 'Swap', value: formatBytes(detail.memory.swapTotal), icon: Layers3 },
+            { label: 'Serial Number', value: detail.host.serialNumber || 'Not Available', icon: ScanSearch },
+            { label: 'Architecture', value: detail.host.architecture || 'N/A', icon: Binary },
+            { label: 'Kernel', value: detail.host.kernelVersion || 'N/A', icon: Cpu },
+            { label: 'Virtualization', value: detail.host.virtualizationType || 'N/A', icon: Layers3 },
+            { label: 'Machine Type', value: detail.host.machineType || 'N/A', icon: Server },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="rounded-lg border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-2.5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-zinc-500">
+                  <Icon className="w-3.5 h-3.5" />
+                  <p>{item.label}</p>
+                </div>
+                <p className="mt-1.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100 break-words">{item.value}</p>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">4. CPU, Memory, Network And Disk Utilization</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Resource utilization</p>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        {[
-          { label: 'CPU', value: `${detail.performance.cpuUsagePct.toFixed(1)}%` },
-          { label: 'Memory', value: `${detail.performance.memoryUsagePct.toFixed(1)}%` },
-          { label: 'Network', value: `${detail.performance.networkUsagePct.toFixed(1)}%` },
-          { label: 'Disk', value: `${detail.performance.diskUsagePct.toFixed(1)}%` },
-        ].map((item) => (
-          <Card key={item.label} className="border-zinc-200 dark:border-zinc-800">
-            <CardContent className="pt-5">
-              <p className="text-xs uppercase tracking-wider text-zinc-500">{item.label} Utilization</p>
-              <p className="text-2xl font-bold mt-1">{item.value}</p>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricChartCard title="CPU Utilization" value={`${detail.performance.cpuUsagePct.toFixed(1)}%`} data={detail.cpuTrend} color="#8b5cf6" />
+        <MetricChartCard title="Memory Utilization" value={`${detail.performance.memoryUsagePct.toFixed(1)}%`} data={detail.memoryTrend} color="#22c55e" />
+        <MetricChartCard title="Network Utilization" value={`${detail.performance.networkUsagePct.toFixed(1)}%`} data={detail.networkTrend} color="#0ea5e9" />
+        <MetricChartCard title="Disk Utilization" value={`${detail.performance.diskUsagePct.toFixed(1)}%`} data={performanceSeries.disk} color="#f59e0b" />
       </div>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">4.1 CPU Metrics And Memory Metrics</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Performance signals</p>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricChartCard title="Latency" value={formatMetric(detail.performance.latencyMs, 'ms')} data={performanceSeries.latency} color="#f59e0b" />
+        <MetricChartCard title="Throughput" value={formatMetric(detail.performance.throughputMbps, 'Mbps')} data={performanceSeries.throughput} color="#10b981" />
+        <MetricChartCard title="Bandwidth" value={formatMetric(detail.performance.bandwidthMbps, 'Mbps')} data={performanceSeries.bandwidth} color="#0ea5e9" />
+        <MetricChartCard title="IOPS" value={detail.performance.iops == null ? 'Not Available' : `${detail.performance.iops.toFixed(2)}`} data={performanceSeries.iops} color="#ef4444" />
+      </div>
+
+      <p className="text-xs uppercase tracking-wider text-zinc-500">CPU and memory metrics</p>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-zinc-200 dark:border-zinc-800">
+        <Card className="min-w-0 border-zinc-200 dark:border-zinc-800">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2"><Cpu className="w-4 h-4" /> CPU Metrics</CardTitle>
             <CardDescription>
               Physical: {detail.cpu.physicalCores || 'N/A'} · Virtual: {detail.cpu.logicalCores || detail.cpu.cores} · Frequency: {detail.cpu.frequencyMHz ? `${(detail.cpu.frequencyMHz / 1000).toFixed(2)} GHz` : 'N/A'}
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="h-[220px] min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
               <AreaChart data={detail.cpuTrend}>
                 <defs>
                   <linearGradient id="infraCpuGrad" x1="0" y1="0" x2="0" y2="1">
@@ -544,15 +899,15 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
           </CardContent>
         </Card>
 
-        <Card className="border-zinc-200 dark:border-zinc-800">
+        <Card className="min-w-0 border-zinc-200 dark:border-zinc-800">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2"><MemoryStick className="w-4 h-4" /> Memory Metrics</CardTitle>
             <CardDescription>
               Physical: {formatBytes(detail.memory.total)} · Used: {formatBytes(detail.memory.used)} · SWAP: {formatBytes(detail.memory.swapUsed)} / {formatBytes(detail.memory.swapTotal)}
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
+          <CardContent className="h-[220px] min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
               <AreaChart data={detail.memoryTrend}>
                 <defs>
                   <linearGradient id="infraMemGrad" x1="0" y1="0" x2="0" y2="1">
@@ -571,17 +926,17 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
         </Card>
       </div>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">5. Network Throughput Trend And Network Latency Trend</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Network performance</p>
 
-      {detail.healthTrend && detail.healthTrend.length > 0 && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="border-zinc-200 dark:border-zinc-800">
-            <CardHeader>
-              <CardTitle className="text-lg">Network Throughput Trend</CardTitle>
-              <CardDescription>RX/TX and external download speed in Mbps</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
+      <div className="grid gap-6 lg:grid-cols-2 min-w-0">
+        <Card className="min-w-0 border-zinc-200 dark:border-zinc-800">
+          <CardHeader>
+            <CardTitle className="text-lg">Network Throughput Trend</CardTitle>
+            <CardDescription>RX/TX and external download speed in Mbps</CardDescription>
+          </CardHeader>
+          <CardContent className="h-[220px] min-w-0">
+            {hasChartData(detail.healthTrend as Array<Record<string, any>>, 'rxMbps') || hasChartData(detail.healthTrend as Array<Record<string, any>>, 'txMbps') ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <AreaChart data={detail.healthTrend}>
                   <defs>
                     <linearGradient id="healthRxGrad" x1="0" y1="0" x2="0" y2="1">
@@ -601,16 +956,20 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                   <Area type="monotone" dataKey="txMbps" stroke="#0ea5e9" fillOpacity={1} fill="url(#healthTxGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            ) : (
+              <ChartPlaceholder />
+            )}
+          </CardContent>
+        </Card>
 
-          <Card className="border-zinc-200 dark:border-zinc-800">
-            <CardHeader>
-              <CardTitle className="text-lg">Network Latency Trend</CardTitle>
-              <CardDescription>Ping latency over recent health checks</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
+        <Card className="min-w-0 border-zinc-200 dark:border-zinc-800">
+          <CardHeader>
+            <CardTitle className="text-lg">Network Latency Trend</CardTitle>
+            <CardDescription>Ping latency over recent health checks</CardDescription>
+          </CardHeader>
+          <CardContent className="h-[220px] min-w-0">
+            {hasChartData(detail.healthTrend as Array<Record<string, any>>, 'latencyMs') ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <AreaChart data={detail.healthTrend}>
                   <defs>
                     <linearGradient id="healthLatencyGrad" x1="0" y1="0" x2="0" y2="1">
@@ -625,12 +984,14 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                   <Area type="monotone" dataKey="latencyMs" stroke="#f59e0b" fillOpacity={1} fill="url(#healthLatencyGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+            ) : (
+              <ChartPlaceholder />
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">6. CPU Temperature</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Thermal status</p>
 
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader>
@@ -641,7 +1002,7 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
         </CardHeader>
       </Card>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">7. Disk Monitoring</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Disk monitoring</p>
 
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader className="flex flex-row items-start justify-between">
@@ -662,16 +1023,20 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
         </CardHeader>
         <CardContent>
           {selectedDisk ? (
-            <div className="grid md:grid-cols-3 gap-4 text-sm">
+            <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4 text-sm">
               <div><p className="text-zinc-500">Used</p><p className="text-2xl font-bold">{Math.round(selectedDisk.usedPct)}%</p></div>
               <div><p className="text-zinc-500">Remaining</p><p className="text-2xl font-bold">{formatBytes(selectedDisk.availBytes)}</p></div>
               <div><p className="text-zinc-500">Filesystem</p><p className="text-base font-medium break-all">{selectedDisk.filesystem}</p></div>
+              <div><p className="text-zinc-500">Health</p><p className="text-base font-medium">{selectedDisk.healthStatus || 'N/A'}</p></div>
+              <div><p className="text-zinc-500">Read Bytes</p><p className="text-base font-medium">{formatBytes(selectedDisk.readBytes || 0)}</p></div>
+              <div><p className="text-zinc-500">Write Bytes</p><p className="text-base font-medium">{formatBytes(selectedDisk.writeBytes || 0)}</p></div>
+              <div className="md:col-span-2"><p className="text-zinc-500">SMART Summary</p><p className="text-sm font-medium">{selectedDisk.smartSummary || 'Not Available'}</p></div>
             </div>
           ) : <p className="text-sm text-zinc-500">No disk data available.</p>}
         </CardContent>
       </Card>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">8. Inode Monitoring</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Inode monitoring</p>
 
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader className="flex flex-row items-start justify-between">
@@ -694,24 +1059,24 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
           {selectedInode ? (
             <div className="grid md:grid-cols-4 gap-4 text-sm">
               <div><p className="text-zinc-500">Used %</p><p className="text-xl font-bold">{Math.round(selectedInode.usedPct)}%</p></div>
-              <div><p className="text-zinc-500">Used</p><p className="text-xl font-bold">{selectedInode.used.toLocaleString()}</p></div>
-              <div><p className="text-zinc-500">Free</p><p className="text-xl font-bold">{selectedInode.free.toLocaleString()}</p></div>
+              <div><p className="text-zinc-500">Used</p><p className="text-xl font-bold">{selectedInode.used == null ? 'N/A' : selectedInode.used.toLocaleString()}</p></div>
+              <div><p className="text-zinc-500">Free</p><p className="text-xl font-bold">{selectedInode.free == null ? 'N/A' : selectedInode.free.toLocaleString()}</p></div>
               <div><p className="text-zinc-500">Total Inodes</p><p className="text-xl font-bold">{selectedInode.inodes?.toLocaleString() || 'N/A'}</p></div>
             </div>
           ) : <p className="text-sm text-zinc-500">No inode data available.</p>}
         </CardContent>
       </Card>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">9. Network Monitoring</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Network interfaces</p>
 
-      <Card className="border-zinc-200 dark:border-zinc-800">
+      <Card className="min-w-0 border-zinc-200 dark:border-zinc-800">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2"><Network className="w-4 h-4" /> Network Monitoring</CardTitle>
           <CardDescription>Interface activity trend and latest addresses</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-[220px] w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
               <AreaChart data={detail.networkTrend}>
                 <defs>
                   <linearGradient id="infraNetGrad" x1="0" y1="0" x2="0" y2="1">
@@ -736,12 +1101,15 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                   <TableHead>Family</TableHead>
                   <TableHead>Address</TableHead>
                   <TableHead>Scope</TableHead>
+                  <TableHead>RX</TableHead>
+                  <TableHead>TX</TableHead>
+                  <TableHead>Packets</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {!networkRows.length ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-sm text-zinc-500 py-6 text-center">
+                    <TableCell colSpan={7} className="text-sm text-zinc-500 py-6 text-center">
                       No network interface addresses reported in the latest snapshot.
                     </TableCell>
                   </TableRow>
@@ -752,6 +1120,9 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                       <TableCell>{row.family}</TableCell>
                       <TableCell className="font-mono text-xs max-w-[420px] truncate">{row.address}</TableCell>
                       <TableCell>{row.scope}</TableCell>
+                      <TableCell>{formatBytes(detail.networkInterfaces.find((ni) => ni.name === row.name)?.bytesRecv || 0)}</TableCell>
+                      <TableCell>{formatBytes(detail.networkInterfaces.find((ni) => ni.name === row.name)?.bytesSent || 0)}</TableCell>
+                      <TableCell>{((detail.networkInterfaces.find((ni) => ni.name === row.name)?.packetsRecv || 0) + (detail.networkInterfaces.find((ni) => ni.name === row.name)?.packetsSent || 0)).toLocaleString()}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -761,7 +1132,54 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
         </CardContent>
       </Card>
 
-      <p className="text-xs uppercase tracking-wider text-zinc-500">10. Status And Active Issues</p>
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Docker monitoring</p>
+
+      <Card className="border-zinc-200 dark:border-zinc-800">
+        <CardHeader>
+          <CardTitle className="text-lg">Docker Monitoring</CardTitle>
+          <CardDescription>Container runtime summary and latest per-container stats.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3 text-sm">
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Docker Status</p><p className="font-semibold mt-1">{detail.docker?.statusText || 'Docker not running or Not Available'}</p></div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Containers</p><p className="font-semibold mt-1">{detail.docker?.total ?? 0}</p></div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Running</p><p className="font-semibold mt-1">{detail.docker?.running ?? 0}</p></div>
+          </div>
+
+          {!detail.docker?.containers?.length ? (
+            <p className="text-sm text-zinc-500">{detail.docker?.error || 'Docker not running or Not Available'}</p>
+          ) : (
+            <div className="overflow-x-auto border rounded-md border-zinc-200 dark:border-zinc-800">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Image</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>CPU</TableHead>
+                    <TableHead>Memory</TableHead>
+                    <TableHead>Network</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {detail.docker.containers.map((container) => (
+                    <TableRow key={container.id}>
+                      <TableCell className="font-medium">{container.name}</TableCell>
+                      <TableCell>{container.image || 'N/A'}</TableCell>
+                      <TableCell>{container.status || container.state || 'Unknown'}</TableCell>
+                      <TableCell>{container.cpuPercent == null ? 'N/A' : `${container.cpuPercent.toFixed(1)}%`}</TableCell>
+                      <TableCell>{container.memoryPercent == null ? 'N/A' : `${container.memoryPercent.toFixed(1)}%`}</TableCell>
+                      <TableCell>{formatBytes(container.netRxBytes)} / {formatBytes(container.netTxBytes)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-xs uppercase tracking-wider text-zinc-500">Active issues</p>
 
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader>
@@ -780,7 +1198,11 @@ export default function InfraDetail({ agentId, onBack }: InfraDetailProps) {
                   </Badge>
                   <span className="font-mono text-xs">{issue.ticket_id}</span>
                   <span className="text-zinc-600 dark:text-zinc-300">{issue.metric_type.toUpperCase()} ({issue.resource_key})</span>
-                  <span className="text-zinc-500">{Number(issue.current_value).toFixed(1)}% ({issue.threshold_value}%)</span>
+                  {issue.current_value != null || issue.threshold_value != null ? (
+                    <span className="text-zinc-500">{issue.current_value == null ? 'N/A' : `${Number(issue.current_value).toFixed(1)}%`} ({issue.threshold_value == null ? 'N/A' : `${issue.threshold_value}%`})</span>
+                  ) : issue.description ? (
+                    <span className="text-zinc-500">{issue.description}</span>
+                  ) : null}
                 </div>
               ))}
             </div>

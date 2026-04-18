@@ -76,14 +76,15 @@ function statusBadgeClass(status: RequestStatus): string {
 
 function roleLabel(role: string): string {
   const value = String(role || '').toLowerCase();
-  if (value === 'admin') return 'Administrator';
-  if (value === 'superuser') return 'SuperUser';
+  if (value === 'admin') return 'Admin';
+  if (value === 'superuser') return 'Super-user';
+  if (value === 'viewer') return 'Viewer';
   return 'Staff';
 }
 
 export default function AccessRequestsPage() {
   const currentUser = getStoredUser();
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superuser';
 
   const [statusFilter, setStatusFilter] = useState<RequestStatus>('pending');
   const [requests, setRequests] = useState<AccessRequest[]>([]);

@@ -47,6 +47,8 @@ type ObservabilityResponse = {
   };
 };
 
+const OBSERVABILITY_CACHE_KEY = 'portal-observability-summary-cache-v1';
+
 function EmptyState({ title, message }: { title: string; message: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 px-4">
@@ -152,8 +154,16 @@ function parseInsightSections(summary?: string | null): InsightSection[] {
 }
 
 export default function ObservabilityPage() {
-  const [data, setData] = useState<ObservabilityResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<ObservabilityResponse | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(OBSERVABILITY_CACHE_KEY);
+      return raw ? JSON.parse(raw) as ObservabilityResponse : null;
+    } catch {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(!data);
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
@@ -164,19 +174,25 @@ export default function ObservabilityPage() {
       try {
         const res = await fetch(apiUrl('/api/observability/summary'));
         const json = await res.json();
-        if (!ignore) setData(json);
+        if (!ignore) {
+          setData(json);
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(OBSERVABILITY_CACHE_KEY, JSON.stringify(json));
+          }
+        }
       } catch {
-        if (!ignore) setData(null);
+        if (!ignore && !data) setData(null);
       } finally {
         if (!ignore) setLoading(false);
       }
     };
 
-    load();
-    const id = setInterval(load, 60_000);
+    if (!data || refreshTick > 0) {
+      load();
+    }
+
     return () => {
       ignore = true;
-      clearInterval(id);
     };
   }, [refreshTick]);
 
@@ -256,7 +272,7 @@ export default function ObservabilityPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300">
-                    Auto refresh · 60s
+                    On-demand refresh
                   </Badge>
                   <Badge variant="outline" className="border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
                     Last update · {fmtTs(data?.generatedAt || null)}
@@ -270,7 +286,7 @@ export default function ObservabilityPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => setRefreshTick((v) => v + 1)} disabled={loading}>
                   <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh Dashboard
+                  {data ? 'Regenerate Summary' : 'Generate Summary'}
                 </Button>
               </div>
             </div>

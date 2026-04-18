@@ -14,7 +14,12 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ['localhost', 'pulseiq.kompedia.in','app.kompedia.in','apis.kompedia.in'],
-    port: 5173,
+    port: 7145,
+    strictPort: true,
+  },
+  preview: {
+    port: 7145,
+    strictPort: true,
   },
   plugins: [
     tailwindcss(),

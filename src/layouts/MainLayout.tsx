@@ -4,7 +4,7 @@ import {
   Settings, Terminal, Menu, X, Box,
   Moon, Sun, HelpCircle, RefreshCw, ChevronDown,
   Search, Network, Activity, Database, ChevronRight,
-  Router, UserCheck,
+  Router, UserCheck, Radio,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { apiUrl } from '../lib/api';
@@ -79,7 +79,7 @@ const PAGE_META: Record<string, { title: string; description?: string }> = {
 
 export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefresh }: Props) {
   const currentUser = getStoredUser();
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superuser';
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
@@ -271,6 +271,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
     { name: 'Data Centers',      route: 'data-centers',      icon: Database },
     { name: 'Network Diagram',   route: 'network-design',    icon: Network },
     { name: 'Maintainance Mode', route: 'maintainance-mode', icon: Settings },
+    { name: 'Broadcast', route: 'broadcast', icon: Radio },
   ];
 
   // Bottom nav items (above admin user section)
@@ -424,10 +425,12 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
           const displayName = u?.username ?? 'User';
           const initials = displayName.slice(0, 2).toUpperCase();
           const roleLabel = u?.role === 'admin'
-            ? 'Administrator'
+            ? 'Admin'
             : u?.role === 'superuser'
-              ? 'SuperUser'
-              : 'Staff';
+              ? 'Super-user'
+              : u?.role === 'viewer'
+                ? 'Viewer'
+                : 'Staff';
           return (
             <button
               type="button"

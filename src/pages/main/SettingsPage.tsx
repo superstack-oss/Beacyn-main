@@ -79,7 +79,7 @@ const TIMEZONES = [
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const currentUser = getStoredUser();
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superuser';
 
   // Display Timezone
   const [timezone, setTimezone] = useState('Asia/Kolkata');
@@ -705,7 +705,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between text-sm">
             <span className="text-zinc-500">Role</span>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded ${isAdmin ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}>
-              {isAdmin ? 'Administrator' : (currentUser?.role === 'superuser' ? 'SuperUser' : 'Staff')}
+              {currentUser?.role === 'superuser' ? 'Super-user' : isAdmin ? 'Admin' : (currentUser?.role === 'viewer' ? 'Viewer' : 'Staff')}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">

@@ -53,8 +53,12 @@ interface ServerListItem {
   agentId: string;
   serialNumber?: string | null;
   hostname: string;
+  platform?: string;
+  os?: string;
+  osVersion?: string;
   machineType?: string;
-  status: 'Down' | 'Healthy' | 'Warning' | 'Faulty' | string;
+  status: 'Online' | 'Down' | 'Healthy' | 'Warning' | 'Faulty' | 'Delayed' | string;
+  heartbeat?: string | null;
   isStale?: boolean;
   isAlive?: boolean;
   frequencyGHz: number;
@@ -63,18 +67,64 @@ interface ServerListItem {
   diskUsagePct: number;
   issueCount?: number;
   issueSeverity?: 'P1' | 'P2' | 'P3' | null;
+  uptimeSeconds?: number;
+  lastCollectedAt?: string | null;
 }
 
-function statusClass(status: 'Healthy' | 'Warning' | 'Down' | 'Faulty') {
-  if (status === 'Healthy') return 'border-emerald-200/90 bg-emerald-50/90 text-emerald-700';
-  if (status === 'Warning') return 'border-amber-200/90 bg-amber-50/90 text-amber-700';
+function toSafeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace('%', '').trim());
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function normalizeServerListItem(row: any): ServerListItem {
+  const machineTypeRaw = String(row?.machineType || row?.machine_type || '').toLowerCase();
+  const frequencyGHz = toSafeNumber(
+    row?.frequencyGHz ?? row?.frequency_ghz ?? (toSafeNumber(row?.cpu_frequency_mhz ?? row?.frequencyMHz, 0) / 1000),
+    0
+  );
+  const statusRaw = String(row?.status || 'Down');
+  const heartbeat = row?.heartbeat == null ? null : String(row.heartbeat);
+  const heartbeatActive = heartbeat ? heartbeat.toLowerCase() === 'active' : null;
+  const isAlive = heartbeatActive == null ? (row?.isAlive == null ? statusRaw.toLowerCase() !== 'down' : Boolean(row.isAlive)) : heartbeatActive;
+  const status = isAlive ? 'Online' : (['Warning', 'Faulty', 'Delayed'].includes(statusRaw) ? statusRaw : 'Down');
+
+  return {
+    agentId: String(row?.agentId || row?.agent_id || row?.agent_uuid || row?.id || ''),
+    serialNumber: row?.serialNumber ?? row?.serial_number ?? null,
+    hostname: String(row?.hostname || row?.host || row?.agent_name || row?.name || 'Unknown host'),
+    platform: row?.platform ?? row?.os ?? undefined,
+    os: row?.os ?? row?.platform ?? undefined,
+    osVersion: row?.osVersion ?? row?.platform_version ?? undefined,
+    machineType: machineTypeRaw === 'vm' ? 'VM' : machineTypeRaw === 'baremetal' ? 'Physical' : (row?.machineType || 'Physical'),
+    status,
+    heartbeat,
+    isStale: heartbeatActive == null ? Boolean(row?.isStale) : !heartbeatActive,
+    isAlive,
+    frequencyGHz: Number(frequencyGHz.toFixed(2)),
+    cpuUsagePct: Number(toSafeNumber(row?.cpuUsagePct ?? row?.cpu_usage_percent ?? row?.cpu_usage ?? row?.cpuUsagePercent, 0).toFixed(2)),
+    memoryUsagePct: Number(toSafeNumber(row?.memoryUsagePct ?? row?.memory_used_percent ?? row?.memory_used ?? row?.memoryUsagePercent, 0).toFixed(2)),
+    diskUsagePct: Number(toSafeNumber(row?.diskUsagePct ?? row?.disk_used_percent ?? row?.diskUsagePercent, 0).toFixed(2)),
+    issueCount: toSafeNumber(row?.issueCount ?? row?.open_count, 0),
+    issueSeverity: row?.issueSeverity ?? null,
+    uptimeSeconds: toSafeNumber(row?.uptimeSeconds ?? row?.uptime_seconds, 0),
+    lastCollectedAt: row?.lastCollectedAt ?? row?.last_seen_at ?? row?.collected_at ?? null,
+  };
+}
+
+function statusClass(status: 'Online' | 'Healthy' | 'Warning' | 'Down' | 'Faulty' | 'Delayed') {
+  if (status === 'Online' || status === 'Healthy') return 'border-emerald-200/90 bg-emerald-50/90 text-emerald-700';
+  if (status === 'Warning' || status === 'Delayed') return 'border-amber-200/90 bg-amber-50/90 text-amber-700';
   if (status === 'Faulty') return 'border-fuchsia-200/90 bg-fuchsia-50/90 text-fuchsia-700';
   return 'border-rose-200/90 bg-rose-50/90 text-rose-700';
 }
 
-function statusDotClass(status: 'Healthy' | 'Warning' | 'Down' | 'Faulty') {
-  if (status === 'Healthy') return 'bg-emerald-500';
-  if (status === 'Warning') return 'bg-amber-500';
+function statusDotClass(status: 'Online' | 'Healthy' | 'Warning' | 'Down' | 'Faulty' | 'Delayed') {
+  if (status === 'Online' || status === 'Healthy') return 'bg-emerald-500';
+  if (status === 'Warning' || status === 'Delayed') return 'bg-amber-500';
   if (status === 'Faulty') return 'bg-fuchsia-500';
   return 'bg-rose-500';
 }
@@ -180,10 +230,15 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
 
           const serversRes = await fetch(apiUrl(`/api/infra/servers?${params.toString()}`));
           const serversData = await serversRes.json();
+          const list = Array.isArray(serversData?.servers)
+            ? serversData.servers
+            : Array.isArray(serversData)
+              ? serversData
+              : [];
 
           if (!ignore) {
-            setRows(serversData?.servers || []);
-            setTotal(Number(serversData?.total || 0));
+            setRows(list.map(normalizeServerListItem));
+            setTotal(Number(serversData?.total ?? list.length));
             setAssetRows([]);
           }
         } else {
@@ -359,7 +414,7 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
           <Table>
             <TableHeader>
               <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
-                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Hostname</TableHead>
+                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-left">Hostname</TableHead>
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Machine Type</TableHead>
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Status</TableHead>
                 <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500 text-center">Frequency</TableHead>
@@ -387,21 +442,24 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
                 </TableRow>
               ) : (
                 rows.map((row) => {
-                  const displayStatus = (['Down', 'Healthy', 'Warning', 'Faulty'].includes(String(row.status))
-                    ? row.status
-                    : 'Down') as 'Down' | 'Healthy' | 'Warning' | 'Faulty';
+                  const displayStatus = (row.isAlive
+                    ? 'Online'
+                    : (['Warning', 'Faulty', 'Delayed'].includes(String(row.status)) ? row.status : 'Down')) as 'Online' | 'Down' | 'Warning' | 'Faulty' | 'Delayed';
                   const machineType = String(row.machineType || (view === 'vms' ? 'VM' : 'Physical')).toLowerCase() === 'vm' ? 'VM' : 'Physical';
                   return (
                   <TableRow key={row.agentId} className={`border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors ${row.isStale ? 'opacity-55 grayscale' : ''}`}>
-                    <TableCell className="py-3 text-center align-middle">
+                    <TableCell className="py-3 align-middle text-left">
                       <button
                         type="button"
                         onClick={() => onOpenDetails(row.agentId)}
-                        className="font-medium text-zinc-800 dark:text-zinc-100 leading-tight hover:underline"
+                        className="font-medium text-zinc-800 dark:text-zinc-100 leading-tight hover:underline text-left"
                       >
-                        {row.hostname}
+                        {row.hostname || row.agentId}
                       </button>
-                      <div className="text-[11px] text-zinc-500 mt-0.5">S/N: {row.serialNumber || 'Unavailable'}</div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5">Asset ID: {row.agentId || 'Unavailable'}</div>
+                      <div className="text-[11px] text-zinc-400 mt-0.5">
+                        {row.lastCollectedAt ? `Last seen: ${new Date(row.lastCollectedAt).toLocaleString()}` : 'Awaiting first snapshot'}
+                      </div>
                     </TableCell>
                     <TableCell className="py-3 text-center align-middle">
                       <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${machineType === 'VM'
@@ -418,7 +476,7 @@ export default function InfrastructurePage({ onOpenDetails, onOpenIncidents, onP
                     </TableCell>
                     <TableCell className="py-3 text-center align-middle">
                       <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 px-2 py-0.5 text-sm text-zinc-700 dark:text-zinc-300">
-                        <Gauge className="w-3 h-3 text-zinc-400" />{row.frequencyGHz.toFixed(2)} GHz
+                        <Gauge className="w-3 h-3 text-zinc-400" />{row.frequencyGHz > 0 ? `${row.frequencyGHz.toFixed(2)} GHz` : 'N/A'}
                       </span>
                     </TableCell>
                     <TableCell className="py-2 text-center align-middle">

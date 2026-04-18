@@ -10,6 +10,7 @@ import { apiUrl } from '../../lib/api';
 interface MonitorDetailsProps {
   monitor: any;
   onBack: () => void;
+  onOpenPageSpeed?: (monitor: any) => void;
 }
 
 interface ErrorGuideEntry {
@@ -183,7 +184,7 @@ function selectErrorGuide(entries: ErrorGuideEntry[], diagnostics: any, recentLo
   return bestScore > 0 ? winner : null;
 }
 
-export default function MonitorDetails({ monitor, onBack }: MonitorDetailsProps) {
+export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: MonitorDetailsProps) {
   const [stats, setStats] = useState<any>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -458,15 +459,18 @@ export default function MonitorDetails({ monitor, onBack }: MonitorDetailsProps)
             {(initialLoading || refreshing) && <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-400" />}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="text-zinc-600 bg-gray-100 dark:bg-zinc-950 font-normal" onClick={() => fetchStats(false)}>
+        <div className="flex items-center gap-1 flex-wrap">
+          <Button variant="ghost" size="sm" className="text-zinc-600 dark:text-zinc-300 bg-transparent shadow-none border-0 px-2" onClick={() => fetchStats(false)}>
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
           </Button>
-          <Button variant="outline" size="sm" className="text-zinc-700 bg-gray-100 dark:bg-zinc-950 font-normal" onClick={runDiagnosticsNow} disabled={runningDiagnostics}>
+          <Button variant="ghost" size="sm" className="text-zinc-600 dark:text-zinc-300 bg-transparent shadow-none border-0 px-2" onClick={() => onOpenPageSpeed?.(monitor)}>
+            <Gauge className="w-3.5 h-3.5 mr-1.5" /> PageSpeed
+          </Button>
+          <Button variant="ghost" size="sm" className="text-zinc-700 dark:text-zinc-200 bg-transparent shadow-none border-0 px-2" onClick={runDiagnosticsNow} disabled={runningDiagnostics}>
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${runningDiagnostics ? 'animate-spin' : ''}`} />
             {runningDiagnostics ? 'Running diagnostics...' : 'Run full diagnostics now'}
           </Button>
-          <Button variant="outline" size="sm" className="text-zinc-600 bg-gray-100 dark:bg-zinc-950 font-normal" onClick={() => setIncidentsOpen(true)}>
+          <Button variant="ghost" size="sm" className="text-zinc-600 dark:text-zinc-300 bg-transparent shadow-none border-0 px-2" onClick={() => setIncidentsOpen(true)}>
             <Bug className="w-4 h-4 mr-2" /> Incidents
           </Button>
         </div>

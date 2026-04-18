@@ -13,8 +13,8 @@ interface Props {
 }
 
 export function LoginForm({ setView, onLogin }: Props) {
-  const [username, setUsername] = useState('admin@localhost');
-  const [password, setPassword] = useState('admin');
+  const [username, setUsername] = useState('root@beacyn.com');
+  const [password, setPassword] = useState('Root@123');
   const [error, setError] = useState('');
   const [pendingMessage, setPendingMessage] = useState('');
   const [loading, setLoading] = useState(false);

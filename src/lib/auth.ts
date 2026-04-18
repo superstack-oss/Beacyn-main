@@ -1,6 +1,6 @@
 export interface StoredUser {
   username: string;
-  role: 'admin' | 'staff' | 'superuser';
+  role: 'admin' | 'staff' | 'superuser' | 'viewer';
   token: string;
 }
 

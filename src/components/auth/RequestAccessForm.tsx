@@ -261,7 +261,8 @@ export function RequestAccessForm({ setView }: Props) {
               <SelectContent>
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="staff">Staff</SelectItem>
-                <SelectItem value="superuser">SuperUser</SelectItem>
+                <SelectItem value="superuser">Super-user</SelectItem>
+                <SelectItem value="viewer">Viewer</SelectItem>
               </SelectContent>
             </Select>
           </div>

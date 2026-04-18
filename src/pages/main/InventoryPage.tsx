@@ -86,20 +86,30 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
         || parent === 'docker container';
     };
 
+    const normalizeAgentStatus = (status: unknown) => {
+      const value = String(status || '').toLowerCase();
+      if (value === 'running' || value === 'active' || value === 'online') return 'Running';
+      if (value === 'stopped' || value === 'inactive' || value === 'offline') return 'Stopped';
+      return 'Stopped';
+    };
+
     const load = async () => {
       if (scope === 'agent') {
         const res = await fetch(apiUrl('/api/agents'));
         const data = await res.json();
         if (!Array.isArray(data)) return;
         setInventory(data.map((agent: any) => ({
-          id: agent.id,
-          name: agent.hostname || agent.id,
-          parent_type: 'Agent',
-          sub_type: agent.os || null,
-          target_endpoint: agent.hostname || '-',
+          id: String(agent.agentUuid || agent.id || '-'),
+          name: agent.hostname || agent.agentName || agent.agent_name || '-',
+          hostname: agent.hostname || '-',
+          agent_name: agent.agentName || agent.agent_name || '-',
+          parent_type: 'Auto-detect',
+          sub_type: null,
+          target_endpoint: agent.targetEndpoint || agent.hostname || '-',
           environment: 'Auto-detected',
-          status: agent.status || 'Unknown',
-          last_checked_at: agent.lastHeartbeatAt || null,
+          heartbeat: agent.heartbeat || null,
+          status: normalizeAgentStatus(agent.heartbeat || agent.status),
+          last_checked_at: agent.lastSeenAt || agent.lastHeartbeatAt || null,
           source: 'Auto Detected',
         })));
         return;
@@ -137,6 +147,14 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
   }, [scope]);
 
   const canAddAsset = scope !== 'agent';
+  const isAgentScope = scope === 'agent';
+
+  const agentStatusClass = (status: string) => {
+    const value = String(status || '').toLowerCase();
+    return value === 'running'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-900'
+      : 'bg-zinc-100 text-zinc-500 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-800';
+  };
 
   // Filtered + paginated data
   const filtered = useMemo(() => {
@@ -149,11 +167,14 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
       if (!sourceMatches) return false;
 
       if (!q) return true;
-      return item.name?.toLowerCase().includes(q)
-        || item.id?.toLowerCase().includes(q)
-        || item.parent_type?.toLowerCase().includes(q)
-        || item.target_endpoint?.toLowerCase().includes(q)
-        || item.environment?.toLowerCase().includes(q)
+      return String(item.name || '').toLowerCase().includes(q)
+        || String(item.id || '').toLowerCase().includes(q)
+        || String(item.agent_name || '').toLowerCase().includes(q)
+        || String(item.hostname || '').toLowerCase().includes(q)
+        || String(item.parent_type || '').toLowerCase().includes(q)
+        || String(item.target_endpoint || '').toLowerCase().includes(q)
+        || String(item.environment || '').toLowerCase().includes(q)
+        || String(item.status || '').toLowerCase().includes(q)
         || source.includes(q);
     });
   }, [inventory, search, sourceFilter]);
@@ -166,18 +187,30 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
 
   // CSV download
   const downloadCSV = () => {
-    const headers = ['Asset ID', 'Name', 'Type', 'Sub-Type', 'Target / Endpoint', 'Environment', 'Source', 'Status', 'Last Checked'];
-    const rows = filtered.map(item => [
-      item.id,
-      item.name,
-      item.parent_type || '',
-      item.sub_type || '',
-      item.target_endpoint || '',
-      item.environment || '',
-      item.source || 'User Added',
-      item.status || '',
-      item.last_checked_at ? new Date(item.last_checked_at).toLocaleString() : 'Never',
-    ]);
+    const headers = isAgentScope
+      ? ['Asset ID', 'Hostname', 'Agent Name', 'Target / Endpoint', 'Type', 'Status', 'Last Checked']
+      : ['Asset ID', 'Name', 'Type', 'Sub-Type', 'Target / Endpoint', 'Environment', 'Source', 'Status', 'Last Checked'];
+    const rows = filtered.map(item => isAgentScope
+      ? [
+          item.id,
+          item.hostname || item.name || '',
+          item.agent_name || '',
+          item.target_endpoint || '',
+          item.parent_type || 'Auto-detect',
+          item.status || '',
+          item.last_checked_at ? new Date(item.last_checked_at).toLocaleString() : 'Never',
+        ]
+      : [
+          item.id,
+          item.name,
+          item.parent_type || '',
+          item.sub_type || '',
+          item.target_endpoint || '',
+          item.environment || '',
+          item.source || 'User Added',
+          item.status || '',
+          item.last_checked_at ? new Date(item.last_checked_at).toLocaleString() : 'Never',
+        ]);
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -216,8 +249,8 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
           <div className={`flex flex-col sm:flex-row sm:items-center gap-4 ${scope === 'all' ? 'sm:justify-between' : 'sm:justify-end'}`}>
           {scope === 'all' && (
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 mb-1">Asset Inventory</h1>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Register and manage all your infrastructure assets and endpoints globally.</p>
+              <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 mb-1">{isAgentScope ? 'Agent Inventory' : 'Asset Inventory'}</h1>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{isAgentScope ? 'Review auto-detected agents and their current runtime state.' : 'Register and manage all your infrastructure assets and endpoints globally.'}</p>
             </div>
           )}
 
@@ -367,8 +400,8 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
         <CardHeader className="pb-0 pt-5 px-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <CardTitle className="text-base font-semibold">Asset Registry</CardTitle>
-              <CardDescription className="text-sm mt-0.5">Track and manage all entities available for monitoring.</CardDescription>
+              <CardTitle className="text-base font-semibold">{isAgentScope ? 'Agent Registry' : 'Asset Registry'}</CardTitle>
+              <CardDescription className="text-sm mt-0.5">{isAgentScope ? 'Auto-detected agents from the infrastructure database.' : 'Track and manage all entities available for monitoring.'}</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               {/* Search */}
@@ -377,7 +410,7 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
                 <Input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Search assets..."
+                  placeholder={isAgentScope ? 'Search agents...' : 'Search assets...'}
                   className="pl-8 h-9 w-56 text-sm bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800"
                 />
               </div>
@@ -410,54 +443,70 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
             <TableHeader>
               <TableRow className="hover:bg-transparent border-b border-zinc-100 dark:border-zinc-800">
                 <TableHead className="pl-6 font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Asset ID</TableHead>
-                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Name</TableHead>
-                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Type</TableHead>
+                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">{isAgentScope ? 'Hostname' : 'Name'}</TableHead>
+                {isAgentScope && <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Agent Name</TableHead>}
                 <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Target / Endpoint</TableHead>
-                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Environment</TableHead>
-                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Source</TableHead>
+                <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Type</TableHead>
+                {!isAgentScope && <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Environment</TableHead>}
+                {!isAgentScope && <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Source</TableHead>}
+                {isAgentScope && <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Status</TableHead>}
                 <TableHead className="pr-4 text-right font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginated.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="p-0">
+                  <TableCell colSpan={isAgentScope ? 7 : 7} className="p-0">
                     <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">
                       <EmptyState
-                        title={search ? 'No matching assets' : 'No assets registered yet'}
-                        message={search ? `No assets match "${search}". Try adjusting your search or filters.` : 'Add your first infrastructure asset to start monitoring.'}
+                        title={search ? (isAgentScope ? 'No matching agents' : 'No matching assets') : (isAgentScope ? 'No agents detected yet' : 'No assets registered yet')}
+                        message={search ? `${isAgentScope ? 'No agents' : 'No assets'} match "${search}". Try adjusting your search or filters.` : (isAgentScope ? 'Detected agents from the new database will appear here automatically.' : 'Add your first infrastructure asset to start monitoring.')}
                       />
                     </div>
                   </TableCell>
                 </TableRow>
               )}
-              {paginated.map((item) => (
-                <TableRow key={item.id} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-900/40 border-b border-zinc-100 dark:border-zinc-800/60 group">
+              {paginated.map((item) => {
+                const isStopped = isAgentScope && String(item.status || '').toLowerCase() !== 'running';
+                return (
+                <TableRow key={item.id} className={`border-b border-zinc-100 dark:border-zinc-800/60 group ${isStopped ? 'bg-zinc-50/60 dark:bg-zinc-900/20 opacity-60' : 'hover:bg-zinc-50/60 dark:hover:bg-zinc-900/40'}`}>
                   <TableCell className="pl-6 font-mono text-xs text-zinc-400 py-4 whitespace-nowrap">{item.id}</TableCell>
-                  <TableCell className="font-semibold text-zinc-800 dark:text-zinc-200 py-4">{item.name}</TableCell>
-                  <TableCell className="py-4">
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                      {item.parent_type}{item.sub_type ? ` (${item.sub_type})` : ''}
-                    </span>
-                  </TableCell>
+                  <TableCell className="font-semibold text-zinc-800 dark:text-zinc-200 py-4">{isAgentScope ? (item.hostname || item.name) : item.name}</TableCell>
+                  {isAgentScope && <TableCell className="py-4 text-sm text-zinc-700 dark:text-zinc-300">{item.agent_name || '-'}</TableCell>}
                   <TableCell className="py-4 max-w-[200px]">
                     <span className="text-sm text-blue-600 dark:text-blue-400 truncate block" title={item.target_endpoint}>
                       {item.target_endpoint}
                     </span>
                   </TableCell>
                   <TableCell className="py-4">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium ${envColor(item.environment)}`}>
-                      {item.environment}
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                      {isAgentScope ? 'Auto-detect' : `${item.parent_type}${item.sub_type ? ` (${item.sub_type})` : ''}`}
                     </span>
                   </TableCell>
-                  <TableCell className="py-4">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-md border text-xs font-medium ${String(item.source || '').toLowerCase() === 'auto detected'
-                      ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-900'
-                      : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900'
-                    }`}>
-                      {item.source || 'User Added'}
-                    </span>
-                  </TableCell>
+                  {!isAgentScope && (
+                    <TableCell className="py-4">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium ${envColor(item.environment)}`}>
+                        {item.environment}
+                      </span>
+                    </TableCell>
+                  )}
+                  {!isAgentScope && (
+                    <TableCell className="py-4">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-md border text-xs font-medium ${String(item.source || '').toLowerCase() === 'auto detected'
+                        ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-900'
+                        : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900'
+                      }`}>
+                        {item.source || 'User Added'}
+                      </span>
+                    </TableCell>
+                  )}
+                  {isAgentScope && (
+                    <TableCell className="py-4">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium ${agentStatusClass(item.status)}`}>
+                        {item.status || 'Stopped'}
+                      </span>
+                    </TableCell>
+                  )}
                   <TableCell className="py-4 pr-4 text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -490,7 +539,7 @@ export default function InventoryPage({ scope = 'all' }: { scope?: InventoryScop
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))}
+              )})}
             </TableBody>
           </Table>
 

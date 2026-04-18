@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import LoginPage from './pages/auth/LoginPage';
 import OverviewPage from './pages/main/OverviewPage';
 import InfraDetail from './pages/main/InfraDetail';
@@ -22,12 +22,19 @@ import RackPointPage from './pages/main/RackPointPage';
 import UserDetailsPage from './pages/main/UserDetailsPage';
 import PortalAuditPage from './pages/main/PortalAuditPage';
 import AuditDetailsPage from './pages/main/AuditDetailsPage';
+import BroadcastPage from './pages/main/BroadcastPage';
+import StatusPage from './pages/main/StatusPage';
 import { MainLayout } from './layouts/MainLayout';
-import { Radio, Wrench } from 'lucide-react';
+import { Wrench } from 'lucide-react';
 import { clearStoredUser, getStoredUser } from './lib/auth';
 
 function App() {
-  const [route, setRoute] = useState(() => (getStoredUser() ? 'overview' : 'login'));
+  const [route, setRoute] = useState(() => {
+    const storedUser = getStoredUser();
+    const hashRoute = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '').trim() : '';
+    if (hashRoute.startsWith('broadcast/public/')) return hashRoute;
+    return storedUser ? (hashRoute || 'overview') : 'login';
+  });
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedInfraAgentId, setSelectedInfraAgentId] = useState<string | null>(null);
   const [selectedDatabaseTargetKey, setSelectedDatabaseTargetKey] = useState<string | null>(null);
@@ -38,14 +45,38 @@ function App() {
     setRefreshKey(k => k + 1);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (route && route !== 'login') {
+      window.location.hash = route;
+    } else {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+  }, [route]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onHashChange = () => {
+      const hashRoute = window.location.hash.replace(/^#/, '').trim();
+      if (!hashRoute) return;
+      setRoute(hashRoute);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  if (route.startsWith('broadcast/public/')) {
+    return <StatusPage publicToken={route.replace(/^broadcast\/public\//, '')} />;
+  }
+
   if (route === 'login') {
     return <LoginPage onLogin={() => setRoute('overview')} />;
   }
 
   const renderCurrentRoute = () => {
     switch (route) {
-      case 'overview':          return <OverviewPage key={refreshKey} />;
-      case 'inventory':         return <OverviewPage key={refreshKey} />;
+      case 'overview':          return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
+      case 'inventory':         return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
       case 'infra':
       case 'infra-servers':
         return (
@@ -182,9 +213,9 @@ function App() {
       case 'inventory-snmp':
         return <InventoryPage key={refreshKey} scope="snmp" />;
       case 'broadcast':
-        return <ComingSoonPage icon={Radio} title="Broadcast" description="Push status updates, maintenance windows, and incident communications to all stakeholders in one click." />;
+        return <BroadcastPage />;
 
-      default:                  return <OverviewPage key={refreshKey} />;
+      default:                  return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
     }
   };
 

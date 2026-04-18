@@ -9,6 +9,7 @@ import { Card, CardContent } from '../../components/ui/card';
 import { BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { useState, useEffect } from 'react';
 import MonitorDetails from './MonitorDetails';
+import PageSpeedDetails from './PageSpeedDetails';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { apiUrl } from '../../lib/api';
 
@@ -103,6 +104,7 @@ function useCountUp(target: number, durationMs = 550, reduceMotion = false) {
 export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime' }) {
   const [endpoints, setEndpoints] = useState<any[]>([]);
   const [selectedMonitor, setSelectedMonitor] = useState<any>(null);
+  const [selectedPageSpeedMonitor, setSelectedPageSpeedMonitor] = useState<any>(null);
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
@@ -179,8 +181,18 @@ export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  if (selectedPageSpeedMonitor) {
+    return <PageSpeedDetails monitor={selectedPageSpeedMonitor} onBack={() => setSelectedPageSpeedMonitor(null)} />;
+  }
+
   if (selectedMonitor) {
-    return <MonitorDetails monitor={selectedMonitor} onBack={() => setSelectedMonitor(null)} />;
+    return (
+      <MonitorDetails
+        monitor={selectedMonitor}
+        onBack={() => setSelectedMonitor(null)}
+        onOpenPageSpeed={(monitor) => setSelectedPageSpeedMonitor(monitor)}
+      />
+    );
   }
 
   return (

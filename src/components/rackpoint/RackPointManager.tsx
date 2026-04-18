@@ -3,7 +3,8 @@ import * as XLSX from 'xlsx';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { CheckCircle2, ChevronLeft, Search, X } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
+import { CheckCircle2, ChevronLeft, MoreVertical, Pencil, Search, Trash2, X } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 import { authHeaders, getStoredUser } from '../../lib/auth';
 
@@ -221,6 +222,7 @@ function DrawerShell({ title, description, onClose, children }: { title: string;
 }
 
 function RackFormPanel({
+  mode,
   form,
   saving,
   error,
@@ -229,6 +231,7 @@ function RackFormPanel({
   onClose,
   onSubmit,
 }: {
+  mode: 'create' | 'edit';
   form: typeof EMPTY_RACK_FORM;
   saving: boolean;
   error: string;
@@ -238,7 +241,7 @@ function RackFormPanel({
   onSubmit: () => void;
 }) {
   return (
-    <DrawerShell title="Add Rack" description="Create a rack under the selected data center." onClose={onClose}>
+    <DrawerShell title={mode === 'edit' ? 'Edit Rack' : 'Add Rack'} description={mode === 'edit' ? 'Update rack details and enclosure capacity.' : 'Create a rack under the selected data center.'} onClose={onClose}>
       <div className="space-y-4">
         {error ? <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
         <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
@@ -260,7 +263,7 @@ function RackFormPanel({
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="button" onClick={onSubmit} disabled={saving}>{saving ? 'Saving...' : 'Create Rack'}</Button>
+          <Button type="button" onClick={onSubmit} disabled={saving}>{saving ? 'Saving...' : mode === 'edit' ? 'Save Changes' : 'Create Rack'}</Button>
         </div>
       </div>
     </DrawerShell>
@@ -268,6 +271,7 @@ function RackFormPanel({
 }
 
 function DeviceFormPanel({
+  mode,
   racks,
   form,
   saving,
@@ -276,6 +280,7 @@ function DeviceFormPanel({
   onClose,
   onSubmit,
 }: {
+  mode: 'create' | 'edit';
   racks: Rack[];
   form: typeof EMPTY_DEVICE_FORM;
   saving: boolean;
@@ -286,7 +291,7 @@ function DeviceFormPanel({
 }) {
   const selectedRack = racks.find((rack) => rack.id === form.rackId) || null;
   return (
-    <DrawerShell title="Add Device To Slot" description="Place a device in a rack slot and capture serial number plus reachability target." onClose={onClose}>
+    <DrawerShell title={mode === 'edit' ? 'Edit Device' : 'Add Device To Slot'} description={mode === 'edit' ? 'Update the device details or move it to another slot.' : 'Place a device in a rack slot and capture serial number plus reachability target.'} onClose={onClose}>
       <div className="space-y-4">
         {error ? <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
         <FormField label="Rack">
@@ -324,14 +329,14 @@ function DeviceFormPanel({
         {selectedRack ? <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">Target rack: {selectedRack.name} · {selectedRack.rackType} · capacity {selectedRack.totalU}U.</div> : null}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="button" onClick={onSubmit} disabled={saving || !form.rackId}>{saving ? 'Saving...' : 'Add Device'}</Button>
+          <Button type="button" onClick={onSubmit} disabled={saving || !form.rackId}>{saving ? 'Saving...' : mode === 'edit' ? 'Save Changes' : 'Add Device'}</Button>
         </div>
       </div>
     </DrawerShell>
   );
 }
 
-function RackSlots({ rack, selectedId, searchQuery, canManage, onSelectDevice, onSelectEmptySlot }: { rack: Rack; selectedId: string | null; searchQuery: string; canManage: boolean; onSelectDevice: (device: RackDevice) => void; onSelectEmptySlot: (uStart: number) => void }) {
+function RackSlots({ rack, selectedId, searchQuery, canManage, draggedDeviceId, onSelectDevice, onSelectEmptySlot, onStartDrag, onEndDrag, onDropDevice }: { rack: Rack; selectedId: string | null; searchQuery: string; canManage: boolean; draggedDeviceId: string | null; onSelectDevice: (device: RackDevice) => void; onSelectEmptySlot: (uStart: number) => void; onStartDrag: (device: RackDevice, rack: Rack) => void; onEndDrag: () => void; onDropDevice: (rack: Rack, uStart: number) => void }) {
   const slotMap = useMemo(() => buildSlotMap(rack), [rack]);
   return (
     <div>
@@ -341,8 +346,21 @@ function RackSlots({ rack, selectedId, searchQuery, canManage, onSelectDevice, o
 
         if (!slot) {
           return (
-            <div key={u} style={{ height: U_PX }} onClick={() => canManage && onSelectEmptySlot(u)} className={`border-b border-zinc-800/30 ${canManage ? 'cursor-pointer hover:bg-blue-500/10' : ''}`}>
-              <div className="h-full w-full border-t border-dashed border-zinc-800/20" />
+            <div
+              key={u}
+              style={{ height: U_PX }}
+              onClick={() => canManage && onSelectEmptySlot(u)}
+              onDragOver={(e) => {
+                if (canManage && draggedDeviceId) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                if (!canManage || !draggedDeviceId) return;
+                e.preventDefault();
+                onDropDevice(rack, u);
+              }}
+              className={`border-b border-zinc-800/30 ${canManage ? 'cursor-pointer hover:bg-blue-500/10' : ''} ${draggedDeviceId ? 'bg-sky-500/5 hover:bg-sky-500/15' : ''}`}
+            >
+              <div className={`h-full w-full border-t border-dashed ${draggedDeviceId ? 'border-sky-400/50' : 'border-zinc-800/20'}`} />
             </div>
           );
         }
@@ -359,7 +377,17 @@ function RackSlots({ rack, selectedId, searchQuery, canManage, onSelectDevice, o
           <div
             key={u}
             style={{ height: blockH }}
+            draggable={canManage && slot.type !== 'blank'}
+            onDragStart={() => {
+              if (canManage && slot.type !== 'blank') onStartDrag(slot, rack);
+            }}
+            onDragEnd={onEndDrag}
             onClick={() => slot.type !== 'blank' && onSelectDevice(slot)}
+            onContextMenu={(e) => {
+              if (slot.type === 'blank') return;
+              e.preventDefault();
+              onSelectDevice(slot);
+            }}
             className={[
               'relative overflow-hidden transition-all border-b',
               cfg.blockBg,
@@ -367,6 +395,7 @@ function RackSlots({ rack, selectedId, searchQuery, canManage, onSelectDevice, o
               slot.type !== 'blank' ? `${cfg.blockHover} cursor-pointer` : 'cursor-default',
               isSelected ? 'ring-2 ring-inset ring-white/60' : '',
               isHighlighted && !isSelected ? 'ring-2 ring-inset ring-white/90 brightness-125' : '',
+              draggedDeviceId === slot.id ? 'opacity-70 scale-[0.99]' : '',
             ].filter(Boolean).join(' ')}
           >
             {slot.uSize >= 4 ? <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[repeating-linear-gradient(0deg,transparent,transparent_3px,rgba(255,255,255,0.4)_3px,rgba(255,255,255,0.4)_4px)]" /> : null}
@@ -374,6 +403,7 @@ function RackSlots({ rack, selectedId, searchQuery, canManage, onSelectDevice, o
               <span className={`h-1.5 w-1.5 rounded-full ${availability.dotClass}`} />
               <span className={`h-1.5 w-1.5 rounded-full ${lifecycle.dotClass}`} />
             </div>
+            {canManage && slot.type !== 'blank' ? <span className={`absolute bottom-1 right-2 text-[8px] font-semibold opacity-70 ${cfg.textClass}`}>drag</span> : null}
             {slot.uSize === 1 ? (
               <div className="h-full flex items-center pl-2 pr-8 gap-1.5">
                 <p className={`text-[10px] font-semibold leading-none truncate ${cfg.textClass}`}>{slot.name}</p>
@@ -398,7 +428,7 @@ function RackSlots({ rack, selectedId, searchQuery, canManage, onSelectDevice, o
   );
 }
 
-function RackDiagram({ rack, selectedId, searchQuery, canManage, onSelectDevice, onSelectEmptySlot, onAddDevice }: { rack: Rack; selectedId: string | null; searchQuery: string; canManage: boolean; onSelectDevice: (device: RackDevice, rack: Rack) => void; onSelectEmptySlot: (rack: Rack, uStart: number) => void; onAddDevice: (rack: Rack) => void }) {
+function RackDiagram({ rack, selectedId, searchQuery, canManage, draggedDeviceId, onSelectDevice, onSelectEmptySlot, onAddDevice, onEditRack, onDeleteRack, onStartDrag, onEndDrag, onDropDevice }: { rack: Rack; selectedId: string | null; searchQuery: string; canManage: boolean; draggedDeviceId: string | null; onSelectDevice: (device: RackDevice, rack: Rack) => void; onSelectEmptySlot: (rack: Rack, uStart: number) => void; onAddDevice: (rack: Rack) => void; onEditRack: (rack: Rack) => void; onDeleteRack: (rack: Rack) => void; onStartDrag: (device: RackDevice, rack: Rack) => void; onEndDrag: () => void; onDropDevice: (rack: Rack, uStart: number) => void }) {
   const stats = useMemo(() => getRackStats(rack), [rack]);
   const utilizationGradient = stats.utilization > 85 ? 'from-rose-500 to-orange-500' : stats.utilization > 60 ? 'from-teal-500 to-blue-500' : 'from-zinc-500 to-zinc-400';
 
@@ -412,6 +442,27 @@ function RackDiagram({ rack, selectedId, searchQuery, canManage, onSelectDevice,
           </div>
           <div className="flex items-center gap-1.5">
             {canManage ? <button type="button" onClick={() => onAddDevice(rack)} className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[9px] font-medium text-zinc-200 hover:bg-zinc-700">Add</button> : null}
+            {canManage ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-300 hover:bg-zinc-700">
+                    <MoreVertical className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onEditRack(rack)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit rack
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onAddDevice(rack)}>
+                    <Pencil className="h-3.5 w-3.5" /> Add device
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => onDeleteRack(rack)}>
+                    <Trash2 className="h-3.5 w-3.5" /> Delete rack
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             <span className="text-[10px] font-mono border border-zinc-600 text-zinc-400 rounded px-1.5 py-0.5">{rack.rackType}</span>
           </div>
         </div>
@@ -429,7 +480,7 @@ function RackDiagram({ rack, selectedId, searchQuery, canManage, onSelectDevice,
             {Array.from({ length: rack.totalU }, (_, i) => <div key={i} style={{ height: U_PX }} className="flex items-center justify-between px-1"><div className="h-[5px] w-[5px] rounded-full bg-zinc-700/70 ring-1 ring-zinc-600/30" /><span className="text-[7px] text-zinc-600 font-mono leading-none">{i + 1}</span></div>)}
           </div>
           <div className="flex-1 min-w-0">
-            <RackSlots rack={rack} selectedId={selectedId} searchQuery={searchQuery} canManage={canManage} onSelectDevice={(device) => onSelectDevice(device, rack)} onSelectEmptySlot={(uStart) => onSelectEmptySlot(rack, uStart)} />
+            <RackSlots rack={rack} selectedId={selectedId} searchQuery={searchQuery} canManage={canManage} draggedDeviceId={draggedDeviceId} onSelectDevice={(device) => onSelectDevice(device, rack)} onSelectEmptySlot={(uStart) => onSelectEmptySlot(rack, uStart)} onStartDrag={onStartDrag} onEndDrag={onEndDrag} onDropDevice={onDropDevice} />
           </div>
           <div className="flex-none w-8 bg-zinc-900/80 border-l border-zinc-700/60">
             {Array.from({ length: rack.totalU }, (_, i) => <div key={i} style={{ height: U_PX }} className="flex items-center justify-between px-1"><span className="text-[7px] text-zinc-600 font-mono leading-none">{i + 1}</span><div className="h-[5px] w-[5px] rounded-full bg-zinc-700/70 ring-1 ring-zinc-600/30" /></div>)}
@@ -438,12 +489,13 @@ function RackDiagram({ rack, selectedId, searchQuery, canManage, onSelectDevice,
       </div>
       <div className="rounded-b-xl bg-zinc-900 border border-t-0 border-zinc-700 px-2.5 py-2">
         <p className="text-[9px] text-zinc-600">{rack.dcName}</p>
+        {canManage ? <p className="mt-1 text-[9px] text-zinc-500">Right-click or drag devices to move them.</p> : null}
       </div>
     </div>
   );
 }
 
-function DevicePanel({ device, rack, onClose }: { device: RackDevice; rack: Rack; onClose: () => void }) {
+function DevicePanel({ device, rack, canManage, onClose, onEdit, onDelete }: { device: RackDevice; rack: Rack; canManage: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
   const availability = AVAILABILITY_CONFIG[device.availabilityStatus || 'unknown'];
   const lifecycle = STATUS_CONFIG[device.status];
   useEffect(() => {
@@ -461,13 +513,34 @@ function DevicePanel({ device, rack, onClose }: { device: RackDevice; rack: Rack
             <p className="font-bold text-sm text-zinc-900 dark:text-zinc-50">{device.name}</p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{rack.name} · {rack.dcName}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50"><X className="h-4 w-4" /></button>
+          <div className="flex items-center gap-1">
+            {canManage ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-50">
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={onEdit}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit device
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                    <Trash2 className="h-3.5 w-3.5" /> Delete device
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            <button type="button" onClick={onClose} className="text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50"><X className="h-4 w-4" /></button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="flex flex-wrap gap-2">
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium ${availability.textClass} border-zinc-200 dark:border-zinc-700`}><span className={`h-1.5 w-1.5 rounded-full ${availability.dotClass}`} />{availability.label}</span>
             <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"><span className={`h-1.5 w-1.5 rounded-full ${lifecycle.dotClass}`} />{lifecycle.label}</span>
           </div>
+          {canManage ? <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Use the menu to edit or delete this device, or drag it onto an empty U slot in the rack canvas.</p> : null}
           <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800/80">
             {[
               ['Serial Number', device.serialNumber || '—'],
@@ -549,6 +622,9 @@ export default function RackPointManager() {
   const [savingRack, setSavingRack] = useState(false);
   const [savingDevice, setSavingDevice] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [editingRack, setEditingRack] = useState<Rack | null>(null);
+  const [editingDevice, setEditingDevice] = useState<{ device: RackDevice; rack: Rack } | null>(null);
+  const [draggingDevice, setDraggingDevice] = useState<{ device: RackDevice; rack: Rack } | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -639,49 +715,164 @@ export default function RackPointManager() {
 
   const openRackForm = () => {
     if (!selectedDc) return;
+    setEditingRack(null);
     setRackForm({ ...EMPTY_RACK_FORM, dcId: selectedDc.id, dcName: selectedDc.name });
     setRackFormError('');
     setIsRackFormOpen(true);
   };
 
+  const openEditRackForm = (rack: Rack) => {
+    setEditingRack(rack);
+    setRackForm({
+      name: rack.name,
+      dcId: rack.dcId,
+      dcName: rack.dcName,
+      rackType: rack.rackType,
+      location: rack.location,
+      powerDraw: String(rack.powerDraw || ''),
+    });
+    setRackFormError('');
+    setIsRackFormOpen(true);
+  };
+
   const openDeviceForm = (rack?: Rack, uStart = 1) => {
+    setEditingDevice(null);
     setDeviceForm({ ...EMPTY_DEVICE_FORM, rackId: rack?.id || selectedDcRacks[0]?.id || '', uStart });
     setDeviceFormError('');
     setIsDeviceFormOpen(true);
   };
 
-  const handleCreateRack = async () => {
+  const openEditDeviceForm = (device: RackDevice, rack: Rack) => {
+    setEditingDevice({ device, rack });
+    setSelectedEntry(null);
+    setDeviceForm({
+      rackId: rack.id,
+      name: device.name,
+      serialNumber: String(device.serialNumber || ''),
+      hostname: String(device.hostname || ''),
+      type: (device.type === 'blank' ? 'server' : device.type) as Exclude<DeviceType, 'blank'>,
+      uStart: Number(device.uStart || 1),
+      uSize: Number(device.uSize || 1),
+      vendor: device.vendor,
+      model: device.model,
+      ip: String(device.ip || ''),
+      status: device.status,
+      role: String(device.role || ''),
+      specs: String(device.specs || ''),
+    });
+    setDeviceFormError('');
+    setIsDeviceFormOpen(true);
+  };
+
+  const handleSaveRack = async () => {
     setSavingRack(true);
     setRackFormError('');
     try {
-      const res = await fetch(apiUrl('/api/rackpoint/racks'), { method: 'POST', headers: authHeaders(), body: JSON.stringify(rackForm) });
+      const res = await fetch(
+        editingRack ? apiUrl(`/api/rackpoint/racks/${editingRack.id}/update`) : apiUrl('/api/rackpoint/racks'),
+        { method: 'POST', headers: authHeaders(), body: JSON.stringify(rackForm) }
+      );
       const data = await parseJsonResponseSafe(res);
-      if (!res.ok) throw new Error((data as any)?.error || 'Failed to create rack');
+      if (!res.ok) throw new Error((data as any)?.error || `Failed to ${editingRack ? 'update' : 'create'} rack`);
       setIsRackFormOpen(false);
-      setToast(`Rack ${(data as any)?.name || rackForm.name} created`);
+      setEditingRack(null);
+      setToast(`Rack ${(data as any)?.name || rackForm.name} ${editingRack ? 'updated' : 'created'}`);
       await loadData();
     } catch (err: any) {
-      setRackFormError(err?.message || 'Failed to create rack');
+      setRackFormError(err?.message || `Failed to ${editingRack ? 'update' : 'create'} rack`);
     } finally {
       setSavingRack(false);
     }
   };
 
-  const handleAddDevice = async () => {
+  const handleSaveDevice = async () => {
     setSavingDevice(true);
     setDeviceFormError('');
     try {
       const { rackId, ...payload } = deviceForm;
-      const res = await fetch(apiUrl(`/api/rackpoint/racks/${rackId}/devices`), { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
+      const res = await fetch(
+        editingDevice ? apiUrl(`/api/rackpoint/devices/${editingDevice.device.id}/update`) : apiUrl(`/api/rackpoint/racks/${rackId}/devices`),
+        { method: 'POST', headers: authHeaders(), body: JSON.stringify({ rackId, ...payload }) }
+      );
       const data = await parseJsonResponseSafe(res);
-      if (!res.ok) throw new Error((data as any)?.error || 'Failed to add device');
+      if (!res.ok) throw new Error((data as any)?.error || `Failed to ${editingDevice ? 'update' : 'add'} device`);
       setIsDeviceFormOpen(false);
-      setToast(`Device ${(data as any)?.name || payload.name} added`);
+      setEditingDevice(null);
+      setToast(`Device ${(data as any)?.name || payload.name} ${editingDevice ? 'updated' : 'added'}`);
       await loadData();
     } catch (err: any) {
-      setDeviceFormError(err?.message || 'Failed to add device');
+      setDeviceFormError(err?.message || `Failed to ${editingDevice ? 'update' : 'add'} device`);
     } finally {
       setSavingDevice(false);
+    }
+  };
+
+  const handleDeleteRack = async (rack: Rack) => {
+    if (!window.confirm(`Delete rack ${rack.name} and all of its devices?`)) return;
+    try {
+      const res = await fetch(apiUrl(`/api/rackpoint/racks/${rack.id}/delete`), { method: 'POST', headers: authHeaders() });
+      const data = await parseJsonResponseSafe(res);
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to delete rack');
+      if (selectedEntry?.rack.id === rack.id) setSelectedEntry(null);
+      setToast(`Rack ${rack.name} deleted`);
+      await loadData();
+    } catch (err: any) {
+      setLoadError(err?.message || 'Failed to delete rack');
+    }
+  };
+
+  const handleDeleteDevice = async (entry: { device: RackDevice; rack: Rack }) => {
+    if (!window.confirm(`Delete device ${entry.device.name}?`)) return;
+    try {
+      const res = await fetch(apiUrl(`/api/rackpoint/devices/${entry.device.id}/delete`), { method: 'POST', headers: authHeaders() });
+      const data = await parseJsonResponseSafe(res);
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to delete device');
+      setSelectedEntry(null);
+      setToast(`Device ${entry.device.name} deleted`);
+      await loadData();
+    } catch (err: any) {
+      setLoadError(err?.message || 'Failed to delete device');
+    }
+  };
+
+  const handleMoveDevice = async (entry: { device: RackDevice; rack: Rack }, targetRack: Rack, uStart: number) => {
+    if (entry.device.rackId === targetRack.id && Number(entry.device.uStart) === Number(uStart)) {
+      setDraggingDevice(null);
+      return;
+    }
+
+    setSavingDevice(true);
+    setLoadError('');
+    try {
+      const res = await fetch(apiUrl(`/api/rackpoint/devices/${entry.device.id}/update`), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          rackId: targetRack.id,
+          name: entry.device.name,
+          serialNumber: entry.device.serialNumber || '',
+          hostname: entry.device.hostname || '',
+          type: entry.device.type === 'blank' ? 'server' : entry.device.type,
+          uStart,
+          uSize: entry.device.uSize,
+          vendor: entry.device.vendor,
+          model: entry.device.model,
+          ip: entry.device.ip || '',
+          status: entry.device.status,
+          role: entry.device.role || '',
+          specs: entry.device.specs || '',
+        }),
+      });
+      const data = await parseJsonResponseSafe(res);
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to move device');
+      setSelectedEntry(null);
+      setToast(`Moved ${entry.device.name} to ${targetRack.name} U${uStart}`);
+      await loadData();
+    } catch (err: any) {
+      setLoadError(err?.message || 'Failed to move device');
+    } finally {
+      setSavingDevice(false);
+      setDraggingDevice(null);
     }
   };
 
@@ -776,6 +967,7 @@ export default function RackPointManager() {
 
       {loadError ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{loadError}</div> : null}
       {selectedDc && !selectedDc.isAvailable ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">This data center is currently unavailable for RackPoint onboarding. Rack creation is disabled.</div> : null}
+      {selectedDc ? <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/40 px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">Use the rack and device menus to edit or delete items. Devices can also be dragged to open U slots to change position.</div> : null}
       {!selectedDc ? <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/40 px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">Select a data center to manage racks and devices. RackPoint is now reading the live Data Center inventory.</div> : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -811,14 +1003,14 @@ export default function RackPointManager() {
       ) : (
         <div className="overflow-x-auto pb-6">
           <div className="flex gap-5" style={{ minWidth: 'max-content' }}>
-            {selectedDcRacks.map((rack) => <RackDiagram key={rack.id} rack={rack} selectedId={selectedEntry?.device.id ?? null} searchQuery={search} canManage={canManageSelectedDc} onSelectDevice={(device, selectedRack) => setSelectedEntry({ device, rack: selectedRack })} onSelectEmptySlot={(selectedRack, uStart) => openDeviceForm(selectedRack, uStart)} onAddDevice={(selectedRack) => openDeviceForm(selectedRack, 1)} />)}
+            {selectedDcRacks.map((rack) => <RackDiagram key={rack.id} rack={rack} selectedId={selectedEntry?.device.id ?? null} searchQuery={search} canManage={canManageSelectedDc} draggedDeviceId={draggingDevice?.device.id ?? null} onSelectDevice={(device, selectedRack) => setSelectedEntry({ device, rack: selectedRack })} onSelectEmptySlot={(selectedRack, uStart) => openDeviceForm(selectedRack, uStart)} onAddDevice={(selectedRack) => openDeviceForm(selectedRack, 1)} onEditRack={openEditRackForm} onDeleteRack={(selectedRack) => void handleDeleteRack(selectedRack)} onStartDrag={(device, selectedRack) => setDraggingDevice({ device, rack: selectedRack })} onEndDrag={() => setDraggingDevice(null)} onDropDevice={(selectedRack, uStart) => { if (draggingDevice) void handleMoveDevice(draggingDevice, selectedRack, uStart); }} />)}
           </div>
         </div>
       )}
 
-      {selectedEntry ? <DevicePanel device={selectedEntry.device} rack={selectedEntry.rack} onClose={() => setSelectedEntry(null)} /> : null}
-      {isRackFormOpen && selectedDc ? <RackFormPanel form={rackForm} saving={savingRack} error={rackFormError} selectedDc={selectedDc} onChange={(patch) => setRackForm((prev) => ({ ...prev, ...patch }))} onClose={() => setIsRackFormOpen(false)} onSubmit={handleCreateRack} /> : null}
-      {isDeviceFormOpen ? <DeviceFormPanel racks={selectedDcRacks} form={deviceForm} saving={savingDevice} error={deviceFormError} onChange={(patch) => setDeviceForm((prev) => ({ ...prev, ...patch }))} onClose={() => setIsDeviceFormOpen(false)} onSubmit={handleAddDevice} /> : null}
+      {selectedEntry ? <DevicePanel device={selectedEntry.device} rack={selectedEntry.rack} canManage={canManageSelectedDc} onClose={() => setSelectedEntry(null)} onEdit={() => openEditDeviceForm(selectedEntry.device, selectedEntry.rack)} onDelete={() => void handleDeleteDevice(selectedEntry)} /> : null}
+      {isRackFormOpen && selectedDc ? <RackFormPanel mode={editingRack ? 'edit' : 'create'} form={rackForm} saving={savingRack} error={rackFormError} selectedDc={selectedDc} onChange={(patch) => setRackForm((prev) => ({ ...prev, ...patch }))} onClose={() => { setIsRackFormOpen(false); setEditingRack(null); }} onSubmit={handleSaveRack} /> : null}
+      {isDeviceFormOpen ? <DeviceFormPanel mode={editingDevice ? 'edit' : 'create'} racks={selectedDcRacks} form={deviceForm} saving={savingDevice} error={deviceFormError} onChange={(patch) => setDeviceForm((prev) => ({ ...prev, ...patch }))} onClose={() => { setIsDeviceFormOpen(false); setEditingDevice(null); }} onSubmit={handleSaveDevice} /> : null}
     </div>
   );
 }
