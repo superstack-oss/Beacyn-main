@@ -17,6 +17,7 @@ interface Props {
   setRoute: (route: string) => void;
   onLogout: () => void;
   onRefresh?: () => void;
+  headerContent?: React.ReactNode;
 }
 
 // Regions with their IANA timezone identifiers
@@ -69,15 +70,15 @@ const PAGE_META: Record<string, { title: string; description?: string }> = {
   'portal-audit-details': { title: 'Audit Details',  description: 'Full event context, payloads, and remediation actions.' },
   // Upcoming
   investigate:      { title: 'Investigate',          description: 'Prioritized tickets generated from infrastructure utilization thresholds.' },
-  'network-design': { title: 'Network Design',       description: 'Visualise and document your network topology.' },
+
   rackpoint:        { title: 'RackSpace',            description: 'Rack details and physical infrastructure mapping.' },
   'data-centers':   { title: 'Data Centers',         description: 'Centralized view of your data center footprint and assets.' },
-  'maintainance-mode': { title: 'Maintainance Mode', description: 'Control planned maintenance windows across infrastructure.' },
+
   observability:    { title: 'Observability',        description: 'Unified logs, traces, and metrics across your infrastructure.' },
   broadcast:        { title: 'Broadcast',            description: 'Push status updates and communications to all stakeholders.' },
 };
 
-export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefresh }: Props) {
+export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefresh, headerContent }: Props) {
   const currentUser = getStoredUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superuser';
 
@@ -269,8 +270,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
     { name: 'Observability',     route: 'observability',     icon: Activity },
     { name: 'RackSpace',         route: 'rackpoint',         icon: Network },
     { name: 'Data Centers',      route: 'data-centers',      icon: Database },
-    { name: 'Network Diagram',   route: 'network-design',    icon: Network },
-    { name: 'Maintainance Mode', route: 'maintainance-mode', icon: Settings },
+
     { name: 'Broadcast', route: 'broadcast', icon: Radio },
   ];
 
@@ -508,6 +508,8 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
 
               {/* Right controls */}
               <div className="flex items-center gap-1.5 shrink-0 ml-4">
+                {/* Page-injected header content (e.g. tab nav) */}
+                {headerContent}
                 {/* Refresh */}
                 {onRefresh && (
                   <button

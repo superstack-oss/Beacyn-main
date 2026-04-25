@@ -19,14 +19,7 @@ interface Props {
   checks: Record<string, ServiceCheck[]>;
 }
 
-function formatTime(dateStr: string) {
-  const d = new Date(dateStr);
-  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (seconds < 10) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  return `${Math.floor(seconds / 3600)}h ago`;
-}
+
 
 function exportCSV(services: Service[]) {
   const headers = ['Name', 'Status', 'Type', 'IP / URL', 'Avg Response (ms)', 'Uptime %', 'Category'];

@@ -14,7 +14,7 @@ interface Props {
 
 export function LoginForm({ setView, onLogin }: Props) {
   const [username, setUsername] = useState('root@beacyn.com');
-  const [password, setPassword] = useState('Root@123');
+  const [password, setPassword] = useState('Root@Beacyn#26');
   const [error, setError] = useState('');
   const [pendingMessage, setPendingMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,6 +34,10 @@ export function LoginForm({ setView, onLogin }: Props) {
       if (!res.ok) {
         if (data?.code === 'pending_approval') {
           setPendingMessage(data?.error || 'Your registration is pending admin approval.');
+          return;
+        }
+        if (data?.code === 'suspended') {
+          setPendingMessage(data?.error || 'Your account has been suspended. Contact an administrator.');
           return;
         }
         setError(data?.error || 'Invalid username or password');

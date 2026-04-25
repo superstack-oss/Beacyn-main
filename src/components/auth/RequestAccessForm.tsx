@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { User, Mail, Briefcase, ArrowLeft, Phone, BadgeCheck, Users, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Briefcase, ArrowLeft, Phone, BadgeCheck, Users, ShieldAlert, CheckCircle2, Info } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -19,13 +19,14 @@ export function RequestAccessForm({ setView }: Props) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [company, setCompany] = useState('');
-  const [roleType, setRoleType] = useState('staff');
+  const [roleType, setRoleType] = useState('editor');
   const [team, setTeam] = useState('');
   const [managerName, setManagerName] = useState('');
   const [managerEmail, setManagerEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [showPasswordHints, setShowPasswordHints] = useState(false);
 
   const passwordChecks = useMemo(() => {
     return {
@@ -93,7 +94,7 @@ export function RequestAccessForm({ setView }: Props) {
       setPassword('');
       setConfirmPassword('');
       setCompany('');
-      setRoleType('staff');
+      setRoleType('editor');
       setTeam('');
       setManagerName('');
       setManagerEmail('');
@@ -124,206 +125,219 @@ export function RequestAccessForm({ setView }: Props) {
               <span>{successMessage}</span>
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="req-name">Full Name</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <User className="h-4 w-4 text-zinc-400" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="req-name">Full Name</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <User className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input 
+                  id="req-name"
+                  type="text" 
+                  className="pl-9 bg-transparent"
+                  placeholder="John Doe"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
               </div>
-              <Input 
-                id="req-name"
-                type="text" 
-                className="pl-9 bg-transparent"
-                placeholder="John Doe"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-              />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="req-employee-id">Employee ID</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <BadgeCheck className="h-4 w-4 text-zinc-400" />
+            <div className="space-y-2">
+              <Label htmlFor="req-employee-id">Employee ID</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <BadgeCheck className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input
+                  id="req-employee-id"
+                  type="text"
+                  className="pl-9 bg-transparent"
+                  placeholder="EMP-12345"
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  required
+                />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="req-contact">Contact Number</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Phone className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input
+                  id="req-contact"
+                  type="tel"
+                  className="pl-9 bg-transparent"
+                  placeholder="+1 555 0100"
+                  value={contactNumber}
+                  onChange={(e) => setContactNumber(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="req-email">Work Email</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Mail className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input 
+                  id="req-email"
+                  type="email" 
+                  className="pl-9 bg-transparent"
+                  placeholder="john@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 relative">
+              <Label htmlFor="req-password">Password</Label>
+              <div className="relative">
+                <Input
+                  id="req-password"
+                  type="password"
+                  className="bg-transparent pr-10"
+                  placeholder="Create a strong password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowPasswordHints(!showPasswordHints)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              </div>
+
+              {showPasswordHints && (
+                <div className="absolute top-[68px] z-20 w-full p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl grid grid-cols-1 gap-1.5 text-xs animate-in fade-in zoom-in-95 duration-200">
+                  <p className={passwordChecks.length ? 'text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2' : 'text-zinc-500 flex items-center gap-2'}><span className={`w-1 h-1 rounded-full ${passwordChecks.length ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}></span>At least 8 characters</p>
+                  <p className={passwordChecks.upper ? 'text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2' : 'text-zinc-500 flex items-center gap-2'}><span className={`w-1 h-1 rounded-full ${passwordChecks.upper ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}></span>One uppercase letter</p>
+                  <p className={passwordChecks.lower ? 'text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2' : 'text-zinc-500 flex items-center gap-2'}><span className={`w-1 h-1 rounded-full ${passwordChecks.lower ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}></span>One lowercase letter</p>
+                  <p className={passwordChecks.number ? 'text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2' : 'text-zinc-500 flex items-center gap-2'}><span className={`w-1 h-1 rounded-full ${passwordChecks.number ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}></span>One number</p>
+                  <p className={passwordChecks.special ? 'text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2' : 'text-zinc-500 flex items-center gap-2'}><span className={`w-1 h-1 rounded-full ${passwordChecks.special ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}></span>One special character</p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="req-confirm-password">Confirm Password</Label>
               <Input
-                id="req-employee-id"
-                type="text"
-                className="pl-9 bg-transparent"
-                placeholder="EMP-12345"
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
+                id="req-confirm-password"
+                type="password"
+                className="bg-transparent"
+                placeholder="Re-enter password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 required
               />
+              {confirmPassword.length > 0 && (
+                <p className={`text-xs ${passwordChecks.match ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                  {passwordChecks.match ? 'Passwords match' : 'Passwords do not match'}
+                </p>
+              )}
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="req-contact">Contact Number</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Phone className="h-4 w-4 text-zinc-400" />
+            
+            <div className="space-y-2">
+              <Label htmlFor="req-company">Company</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Briefcase className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input 
+                  id="req-company"
+                  type="text" 
+                  className="pl-9 bg-transparent"
+                  placeholder="Company Name"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  required
+                />
               </div>
-              <Input
-                id="req-contact"
-                type="tel"
-                className="pl-9 bg-transparent"
-                placeholder="+1 555 0100"
-                value={contactNumber}
-                onChange={(e) => setContactNumber(e.target.value)}
-                required
-              />
             </div>
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="req-email">Work Email</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Mail className="h-4 w-4 text-zinc-400" />
-              </div>
-              <Input 
-                id="req-email"
-                type="email" 
-                className="pl-9 bg-transparent"
-                placeholder="john@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="req-password">Password</Label>
-            <Input
-              id="req-password"
-              type="password"
-              className="bg-transparent"
-              placeholder="Create a strong password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-            <div className="grid grid-cols-2 gap-1 text-xs">
-              <p className={passwordChecks.length ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}>At least 8 characters</p>
-              <p className={passwordChecks.upper ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}>One uppercase letter</p>
-              <p className={passwordChecks.lower ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}>One lowercase letter</p>
-              <p className={passwordChecks.number ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}>One number</p>
-              <p className={passwordChecks.special ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}>One special character</p>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="req-confirm-password">Confirm Password</Label>
-            <Input
-              id="req-confirm-password"
-              type="password"
-              className="bg-transparent"
-              placeholder="Re-enter password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-            />
-            {confirmPassword.length > 0 && (
-              <p className={`text-xs ${passwordChecks.match ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
-                {passwordChecks.match ? 'Passwords match' : 'Passwords do not match'}
-              </p>
-            )}
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="req-company">Company</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Briefcase className="h-4 w-4 text-zinc-400" />
-              </div>
-              <Input 
-                id="req-company"
-                type="text" 
-                className="pl-9 bg-transparent"
-                placeholder="Company Name"
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Role Type</Label>
-            <Select value={roleType} onValueChange={setRoleType}>
-              <SelectTrigger className="bg-transparent">
-                <SelectValue placeholder="Select role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="staff">Staff</SelectItem>
-                <SelectItem value="superuser">Super-user</SelectItem>
-                <SelectItem value="viewer">Viewer</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Team</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
-                <Users className="h-4 w-4 text-zinc-400" />
-              </div>
-              <Select value={team} onValueChange={setTeam}>
-                <SelectTrigger className="pl-9 bg-transparent">
-                  <SelectValue placeholder="Select team" />
+            <div className="space-y-2">
+              <Label>Role Type</Label>
+              <Select value={roleType} onValueChange={setRoleType}>
+                <SelectTrigger className="bg-transparent">
+                  <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Storage Team">Storage Team</SelectItem>
-                  <SelectItem value="Platform Team">Platform Team</SelectItem>
-                  <SelectItem value="Database Team">Database Team</SelectItem>
-                  <SelectItem value="Network Team">Network Team</SelectItem>
-                  <SelectItem value="Incident Manager">Incident Manager</SelectItem>
-                  <SelectItem value="Stakeholders">Stakeholders</SelectItem>
-                  <SelectItem value="Monitoring Team">Monitoring Team</SelectItem>
-                  <SelectItem value="Application Team">Application Team</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="editor">Editor</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="req-manager-name">Manager Name</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <ShieldAlert className="h-4 w-4 text-zinc-400" />
+            <div className="space-y-2">
+              <Label>Team</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
+                  <Users className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Select value={team} onValueChange={setTeam}>
+                  <SelectTrigger className="pl-9 bg-transparent">
+                    <SelectValue placeholder="Select team" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Storage Team">Storage Team</SelectItem>
+                    <SelectItem value="Platform Team">Platform Team</SelectItem>
+                    <SelectItem value="Database Team">Database Team</SelectItem>
+                    <SelectItem value="Network Team">Network Team</SelectItem>
+                    <SelectItem value="Incident Manager">Incident Manager</SelectItem>
+                    <SelectItem value="Stakeholders">Stakeholders</SelectItem>
+                    <SelectItem value="Monitoring Team">Monitoring Team</SelectItem>
+                    <SelectItem value="Application Team">Application Team</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <Input
-                id="req-manager-name"
-                type="text"
-                className="pl-9 bg-transparent"
-                placeholder="Manager Name"
-                value={managerName}
-                onChange={(e) => setManagerName(e.target.value)}
-                required
-              />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="req-manager-email">Manager Email</Label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Mail className="h-4 w-4 text-zinc-400" />
+            <div className="space-y-2">
+              <Label htmlFor="req-manager-name">Manager Name</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <ShieldAlert className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input
+                  id="req-manager-name"
+                  type="text"
+                  className="pl-9 bg-transparent"
+                  placeholder="Manager Name"
+                  value={managerName}
+                  onChange={(e) => setManagerName(e.target.value)}
+                  required
+                />
               </div>
-              <Input
-                id="req-manager-email"
-                type="email"
-                className="pl-9 bg-transparent"
-                placeholder="manager@company.com"
-                value={managerEmail}
-                onChange={(e) => setManagerEmail(e.target.value)}
-                required
-              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="req-manager-email">Manager Email</Label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Mail className="h-4 w-4 text-zinc-400" />
+                </div>
+                <Input
+                  id="req-manager-email"
+                  type="email"
+                  className="pl-9 bg-transparent"
+                  placeholder="manager@company.com"
+                  value={managerEmail}
+                  onChange={(e) => setManagerEmail(e.target.value)}
+                  required
+                />
+              </div>
             </div>
           </div>
           

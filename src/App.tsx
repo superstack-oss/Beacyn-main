@@ -1,41 +1,48 @@
 import { useState, useCallback, useEffect } from 'react';
+import { User as UserIcon, KeyRound, Users, MessageSquareText } from 'lucide-react';
 import LoginPage from './pages/auth/LoginPage';
+import PrivacyPolicyPage from './pages/policy/PrivacyPolicyPage';
+import TermsOfServicePage from './pages/policy/TermsOfServicePage';
+import DisclaimerPage from './pages/policy/DisclaimerPage';
+import EULAPage from './pages/policy/EULA';
 import OverviewPage from './pages/main/OverviewPage';
-import InfraDetail from './pages/main/InfraDetail';
-import InfrastructurePage from './pages/main/InfrastructurePage';
-import DatabasePage from './pages/main/DatabasePage';
-import DatabaseDetails from './pages/main/DatabaseDetails';
-import WebMonitors from './pages/main/WebMonitors';
-import AgentsPage from './pages/main/AgentsPage';
+import InfraDetail from './pages/main/infrastructure/InfraDetail';
+import InfrastructurePage from './pages/main/infrastructure/InfrastructurePage';
+import DatabasePage from './pages/main/database/DatabasePage';
+import DatabaseDetails from './pages/main/database/DatabaseDetails';
+import WebMonitors from './pages/main/uptime/WebMonitors';
+import AgentsPage from './pages/main/infrastructure/AgentsPage';
 import InventoryPage from './pages/main/InventoryPage';
-import SettingsPage from './pages/main/SettingsPage';
-import AccessRequestsPage from './pages/main/AccessRequestsPage';
-import ComingSoonPage from './pages/main/ComingSoonPage';
-import InvestigatePage from './pages/main/InvestigatePage';
-import NetworkDiagramPage from './pages/main/NetworkDiagramPage';
-import ObservabilityPage from './pages/main/ObservabilityPage';
-import SnmpDevicesPage from './pages/main/SnmpDevicesPage';
-import DataCentersPage from './pages/main/DataCentersPage';
-import DataCenterDetailsPage from './pages/main/DataCenterDetailsPage';
-import DataCenterContinuityMapPage from './pages/main/DataCenterContinuityMapPage';
-import RackPointPage from './pages/main/RackPointPage';
-import UserDetailsPage from './pages/main/UserDetailsPage';
-import PortalAuditPage from './pages/main/PortalAuditPage';
-import AuditDetailsPage from './pages/main/AuditDetailsPage';
-import BroadcastPage from './pages/main/BroadcastPage';
-import StatusPage from './pages/main/StatusPage';
+import SettingsPage from './pages/main/admin/SettingsPage';
+import AccessRequestsPage from './pages/main/admin/AccessRequestsPage';
+//import ComingSoonPage from './pages/main/ComingSoonPage';
+import InvestigatePage from './pages/main/investigate/InvestigatePage';
+
+import ObservabilityPage from './pages/main/investigate/ObservabilityPage';
+import SnmpDevicesPage from './pages/main/infrastructure/SnmpDevicesPage';
+import DataCentersPage from './pages/main/datacenter/DataCentersPage';
+import DataCenterDetailsPage from './pages/main/datacenter/DataCenterDetailsPage';
+import DataCenterContinuityMapPage from './pages/main/datacenter/DataCenterContinuityMapPage';
+import RackPointPage from './pages/main/datacenter/RackPointPage';
+import UserDetailsPage from './pages/main/admin/UserDetailsPage';
+import PortalAuditPage from './pages/main/admin/PortalAuditPage';
+import AuditDetailsPage from './pages/main/admin/AuditDetailsPage';
+import BroadcastPage from './pages/main/broadcast/BroadcastPage';
+import StatusPage from './pages/main/uptime/StatusPage';
 import { MainLayout } from './layouts/MainLayout';
-import { Wrench } from 'lucide-react';
-import { clearStoredUser, getStoredUser } from './lib/auth';
+import { clearStoredUser, getStoredUser, authHeaders } from './lib/auth';
+import { apiUrl } from './lib/api';
 
 function App() {
   const [route, setRoute] = useState(() => {
     const storedUser = getStoredUser();
     const hashRoute = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '').trim() : '';
     if (hashRoute.startsWith('broadcast/public/')) return hashRoute;
+    if (['privacy', 'terms', 'disclaimer', 'eula'].includes(hashRoute)) return hashRoute;
     return storedUser ? (hashRoute || 'overview') : 'login';
   });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [userDetailsTab, setUserDetailsTab] = useState('profile');
   const [selectedInfraAgentId, setSelectedInfraAgentId] = useState<string | null>(null);
   const [selectedDatabaseTargetKey, setSelectedDatabaseTargetKey] = useState<string | null>(null);
   const [selectedDcId, setSelectedDcId] = useState<string | null>(null);
@@ -45,11 +52,28 @@ function App() {
     setRefreshKey(k => k + 1);
   }, []);
 
+  // On mount, verify session is still valid — log out if account has been suspended
+  useEffect(() => {
+    const user = getStoredUser();
+    if (!user?.token) return;
+    fetch(apiUrl('/api/auth/me'), { headers: authHeaders() })
+      .then(async (res) => {
+        if (res.status === 403) {
+          clearStoredUser();
+          setRoute('login');
+        }
+      })
+      .catch(() => { /* ignore network errors — don't force logout on transient failures */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (route && route !== 'login') {
-      window.location.hash = route;
-    } else {
+      if (window.location.hash !== `#${route}`) {
+        window.location.hash = route;
+      }
+    } else if (route === 'login') {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     }
   }, [route]);
@@ -57,8 +81,26 @@ function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onHashChange = () => {
-      const hashRoute = window.location.hash.replace(/^#/, '').trim();
-      if (!hashRoute) return;
+      const hashRoute = window.location.hash.replace(/^#/, '').trim() || 'overview';
+      if (hashRoute.startsWith('broadcast/public/')) { setRoute(hashRoute); return; }
+      if (['privacy', 'terms', 'disclaimer', 'eula'].includes(hashRoute)) { setRoute(hashRoute); return; }
+      
+      const user = getStoredUser();
+      
+      if (!user) {
+        if (hashRoute !== 'login') {
+          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+        }
+        setRoute('login');
+        return;
+      }
+      
+      if (hashRoute === 'login') {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#overview`);
+        setRoute('overview');
+        return;
+      }
+
       setRoute(hashRoute);
     };
     window.addEventListener('hashchange', onHashChange);
@@ -73,10 +115,26 @@ function App() {
     return <LoginPage onLogin={() => setRoute('overview')} />;
   }
 
+  if (route === 'privacy') {
+    return <PrivacyPolicyPage />;
+  }
+
+  if (route === 'terms') {
+    return <TermsOfServicePage />;
+  }
+
+  if (route === 'disclaimer') {
+    return <DisclaimerPage />;
+  }
+
+  if (route === 'eula') {
+    return <EULAPage />;
+  }
+
   const renderCurrentRoute = () => {
     switch (route) {
-      case 'overview':          return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
-      case 'inventory':         return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
+      case 'overview': return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
+      case 'inventory': return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
       case 'infra':
       case 'infra-servers':
         return (
@@ -107,11 +165,11 @@ function App() {
           />
         );
       case 'infra-storage':
-        return <InfrastructurePage key={refreshKey} view="storage" onOpenDetails={() => {}} />;
+        return <InfrastructurePage key={refreshKey} view="storage" onOpenDetails={() => { }} />;
       case 'infra-san':
-        return <InfrastructurePage key={refreshKey} view="san" onOpenDetails={() => {}} />;
+        return <InfrastructurePage key={refreshKey} view="san" onOpenDetails={() => { }} />;
       case 'infra-computer':
-        return <InfrastructurePage key={refreshKey} view="computer" onOpenDetails={() => {}} />;
+        return <InfrastructurePage key={refreshKey} view="computer" onOpenDetails={() => { }} />;
       case 'database':
         return (
           <DatabasePage
@@ -141,14 +199,14 @@ function App() {
             onBack={() => setRoute('infra-servers')}
           />
         );
-      case 'monitors-web':      return <WebMonitors key={refreshKey} />;
-      case 'inventory-uptime':  return <InventoryPage key={refreshKey} scope="uptime" />;
-      case 'monitors-network':  return <WebMonitors key={refreshKey} />;
-      case 'agents':            return <AgentsPage />;
-      case 'inventory-agent':   return <InventoryPage key={refreshKey} scope="agent" />;
-      case 'settings':          return <SettingsPage />;
-      case 'access-requests':   return <AccessRequestsPage />;
-      case 'user-details':      return <UserDetailsPage />;
+      case 'monitors-web': return <WebMonitors key={refreshKey} />;
+      case 'inventory-uptime': return <InventoryPage key={refreshKey} scope="uptime" />;
+      case 'monitors-network': return <WebMonitors key={refreshKey} />;
+      case 'agents': return <AgentsPage />;
+      case 'inventory-agent': return <InventoryPage key={refreshKey} scope="agent" />;
+      case 'settings': return <SettingsPage />;
+      case 'access-requests': return <AccessRequestsPage />;
+      case 'user-details': return <UserDetailsPage activeTab={userDetailsTab} setActiveTab={setUserDetailsTab} />;
       case 'portal-audit':
         return (
           <PortalAuditPage
@@ -176,8 +234,7 @@ function App() {
           />
         );
       // ── Upcoming pages ───────────────────────────────────────────────────
-      case 'network-design':
-        return <NetworkDiagramPage />;
+
       case 'rackpoint':
         return <RackPointPage />;
       case 'data-centers':
@@ -204,8 +261,6 @@ function App() {
         );
       case 'data-center-continuity-map':
         return <DataCenterContinuityMapPage key={refreshKey} onBack={() => setRoute('data-centers')} />;
-      case 'maintainance-mode':
-        return <ComingSoonPage icon={Wrench} title="Maintainance Mode" description="Planned maintenance orchestration is coming soon." />;
       case 'observability':
         return <ObservabilityPage />;
       case 'snmp':
@@ -215,16 +270,52 @@ function App() {
       case 'broadcast':
         return <BroadcastPage />;
 
-      default:                  return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
+      default: return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
     }
   };
+
+  const USER_DETAILS_TABS = [
+    { key: 'profile',  label: 'Profile',  Icon: UserIcon },
+    { key: 'password', label: 'Password', Icon: KeyRound },
+    { key: 'team',     label: 'Team',     Icon: Users },
+    { key: 'feedback', label: 'Feedback', Icon: MessageSquareText },
+  ] as const;
+
+  const userDetailsHeaderContent = route === 'user-details' ? (
+    <>
+      <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+      <div className="flex items-center gap-0.5">
+        {USER_DETAILS_TABS.map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setUserDetailsTab(key)}
+            className={`h-8 inline-flex items-center gap-1.5 px-2.5 text-sm rounded-md transition-colors ${
+              userDetailsTab === key
+                ? 'text-zinc-900 dark:text-zinc-50 font-medium'
+                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+    </>
+  ) : null;
 
   return (
     <MainLayout
       currentRoute={route}
       setRoute={setRoute}
-      onLogout={() => { clearStoredUser(); setRoute('login'); }}
+      onLogout={() => { 
+        clearStoredUser(); 
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+        setRoute('login'); 
+      }}
       onRefresh={handleRefresh}
+      headerContent={userDetailsHeaderContent}
     >
       {renderCurrentRoute()}
     </MainLayout>

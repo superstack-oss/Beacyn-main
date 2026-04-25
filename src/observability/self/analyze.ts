@@ -30,6 +30,7 @@ export interface ObservabilityDataset {
     avgDbLatencyMs: number;
     degradedSnmpDevices?: number;
     snmpTrapEvents1h?: number;
+    criticalSyslogEvents1h?: number;
   };
 }
 
@@ -152,6 +153,20 @@ export function runSelfObservabilityAnalysis(dataset: ObservabilityDataset): Sel
       metric: 'snmp_traps_1h',
       value: snmpTrapEvents1h,
       threshold: 20,
+    });
+  }
+
+  const criticalSyslogs = Number(dataset.metrics.criticalSyslogEvents1h || 0);
+  if (criticalSyslogs > 0) {
+    issues.push({
+      id: 'syslog-critical',
+      severity: criticalSyslogs >= 5 ? 'critical' : 'warning',
+      source: 'syslog_events',
+      title: 'Critical syslog events from infrastructure devices',
+      detail: `${criticalSyslogs} critical-severity syslog messages received from storage/SAN/network devices in the last hour.`,
+      metric: 'critical_syslog_events_1h',
+      value: criticalSyslogs,
+      threshold: 1,
     });
   }
 

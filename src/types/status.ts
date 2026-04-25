@@ -32,4 +32,6 @@ export interface Incident {
   status: 'active' | 'resolved';
   created_at: string;
   resolved_at?: string;
+  isGlobal?: boolean;
+  pageId?: string;
 }

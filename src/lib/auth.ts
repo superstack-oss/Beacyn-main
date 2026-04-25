@@ -2,6 +2,7 @@ export interface StoredUser {
   username: string;
   role: 'admin' | 'staff' | 'superuser' | 'viewer';
   token: string;
+  expiresAt?: number;
 }
 
 const STORAGE_KEY = 'pulseiq.auth';
@@ -13,15 +14,26 @@ export function getStoredUser(): StoredUser | null {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed?.username && parsed?.role && parsed?.token) return parsed as StoredUser;
-    return null;
+    if (!parsed?.username || !parsed?.role || !parsed?.token) return null;
+    
+    // Check local 24-hour expiration threshold
+    if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    
+    return parsed as StoredUser;
   } catch {
     return null;
   }
 }
 
 export function setStoredUser(u: StoredUser): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+  const secureUser = {
+    ...u,
+    expiresAt: u.expiresAt || Date.now() + 24 * 60 * 60 * 1000 // default 24 hour lifespan
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(secureUser));
 }
 
 export function clearStoredUser(): void {

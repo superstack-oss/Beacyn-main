@@ -103,7 +103,7 @@ export function HeroSection({
               Public Status Page
             </h1>
             <p className="text-sm text-slate-400 dark:text-zinc-500 mt-0.5">
-              {companyName || 'ACME Corp'} · {pageAddress || 'status.acme-corp.io'}
+              {companyName || 'ACME Corp'} | {pageAddress || 'status.acme-corp.io'}
             </p>
           </div>
         </div>
@@ -172,12 +172,12 @@ export function HeroSection({
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-lg font-bold leading-none ${uptimeColor}`}>
+                <span className={`text-sm font-normal leading-none ${uptimeColor}`}>
                   {avgUptime.toFixed(1)}%
                 </span>
               </div>
             </div>
-            <span className="text-xs text-slate-400 dark:text-zinc-500 font-semibold uppercase tracking-wide mt-1">
+            <span className="text-xs text-slate-400 dark:text-zinc-500 font-normal tracking-wide mt-2">
               Uptime
             </span>
           </div>

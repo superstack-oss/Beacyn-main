@@ -11,7 +11,7 @@ interface Props {
 
 export default function LoginPage({ onLogin }: Props) {
   const [view, setView] = useState<'login' | 'reset' | 'request'>('login');
-  
+
   // Theme state initialization 
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -36,10 +36,18 @@ export default function LoginPage({ onLogin }: Props) {
   }, [isDark]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 font-sans transition-colors duration-200">
-      <AuthHeader isDark={isDark} toggleTheme={() => setIsDark(!isDark)} />
-      
-      <main className="flex-1 flex items-center justify-center p-4 w-full">
+    <div className="relative  min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 font-sans transition-colors duration-200">
+
+
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)] bg-[size:14px_14px] dark:hidden" />
+      <div className="pointer-events-none absolute inset-0 hidden dark:block bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] bg-[size:14px_14px]" />
+
+      <div className="relative items-end justify-end w-full">
+        <AuthHeader isDark={isDark} toggleTheme={() => setIsDark(!isDark)} />
+      </div>
+
+      <main className="relative flex-1 flex items-center justify-center p-4 w-full">
+
         {/* Form content */}
         <div className={`w-full ${view === 'request' ? 'max-w-[560px]' : 'max-w-[420px]'} relative`}>
           {view === 'login' && <LoginForm setView={setView} onLogin={onLogin} />}
@@ -48,7 +56,9 @@ export default function LoginPage({ onLogin }: Props) {
         </div>
       </main>
 
-      <AuthFooter />
+      <div className="relative">
+        <AuthFooter />
+      </div>
     </div>
   );
 }

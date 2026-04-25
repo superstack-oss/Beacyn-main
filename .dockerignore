@@ -1,0 +1,39 @@
+# .dockerignore
+# ─────────────────────────────────────────────────────────────────────────────
+# Applied to the Docker build context (project root).
+# Prevents large / irrelevant files from being sent to the Docker daemon,
+# which speeds up builds and reduces image bloat.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Node modules — rebuilt inside the container
+node_modules/
+
+# Previous build artefacts — rebuilt in Stage 1
+dist/
+
+# Version control
+.git/
+.gitignore
+
+# Local environment files (secrets must not enter the image)
+.env
+.env.local
+.env.*.local
+.eula-accepted
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test / coverage output
+coverage/
