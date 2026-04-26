@@ -41,17 +41,17 @@ done
 [[ -n "$ENV_FILE" ]] || { echo "Missing --env-file" >&2; exit 1; }
 [[ -n "$SERVICE_MANAGER" ]] || { echo "Missing --service-manager" >&2; exit 1; }
 
-CLI_SOURCE="$APP_DIR/src/scripts/beacynctl.sh"
+CLI_SOURCE="$APP_DIR/src/scripts/cli/beacynctl.sh"
 CLI_DIR="$APP_DIR/bin"
 CLI_PATH="$CLI_DIR/beacynctl"
-CLI_CONFIG="$APP_DIR/.beacynctl.env"
-CLI_CMD_FILE="$APP_DIR/.beacynctl-command"
-CLI_PATH_HINT_FILE="$APP_DIR/.beacynctl-path-hint"
+CLI_META_DIR="$APP_DIR/src/scripts/cli"
+CLI_CONFIG="$CLI_META_DIR/.beacynctl.env"
 PID_FILE="$APP_DIR/.beacyn.pid"
 
 [[ -f "$CLI_SOURCE" ]] || { echo "beacynctl source not found: $CLI_SOURCE" >&2; exit 1; }
 
 mkdir -p "$CLI_DIR"
+mkdir -p "$CLI_META_DIR"
 cp "$CLI_SOURCE" "$CLI_PATH"
 chmod +x "$CLI_PATH"
 
@@ -130,23 +130,6 @@ if [[ "$AUTO_PATH_NORMALIZED" == "true" || "$AUTO_PATH_NORMALIZED" == "1" || "$A
       ;;
   esac
 fi
-
-BEACYN_CTL_CMD="${CLI_PATH/#$HOME/~}"
-case ":$PATH:" in
-  *":$CLI_DIR:"*) BEACYN_CTL_CMD="beacynctl" ;;
-esac
-
-cat > "$CLI_PATH_HINT_FILE" <<EOF
-Add beacynctl to PATH (manual step):
-
-export PATH="$CLI_DIR:\$PATH"
-
-Then reload shell:
-source ~/.zshrc    # zsh
-source ~/.bashrc   # bash
-EOF
-
-echo "$BEACYN_CTL_CMD" > "$CLI_CMD_FILE"
 
 echo "beacynctl installed at: $CLI_PATH"
 if [[ "$AUTO_PATH_APPLIED" == "true" ]]; then

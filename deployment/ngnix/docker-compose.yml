@@ -1,0 +1,96 @@
+name: beacyn-ngnix
+
+services:
+  app:
+    container_name: beacyn-app
+    image: beacyn-app:2.0.1
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5145}
+        VITE_APP_URL: ${VITE_APP_URL:-http://localhost:7145}
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-5145}:5145"
+      - "${FRONTEND_PORT:-7145}:7145"
+    environment:
+      NODE_ENV: production
+      EULA_ACCEPTED: "true"
+      DB_HOST: beacyn-db
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Password@123}
+      DB_NAME: ${DB_NAME:-pulseiq}
+      INFRA_DB_NAME: ${INFRA_DB_NAME:-bsa}
+      DB_SSL: "false"
+      DB_SSL_REJECT_UNAUTHORIZED: "false"
+      VITE_APP_URL: ${VITE_APP_URL:-http://localhost:7145}
+      PULSE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5145}
+      SNMP_TRAP_ENABLED: ${SNMP_TRAP_ENABLED:-true}
+      SNMP_TRAP_BIND_HOST: "0.0.0.0"
+      SNMP_TRAP_PORT: ${SNMP_TRAP_PORT:-9162}
+      SNMP_COMMUNITY: ${SNMP_COMMUNITY:-public}
+      SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
+      SYSLOG_BIND_HOST: "0.0.0.0"
+      SYSLOG_UDP_PORT: ${SYSLOG_UDP_PORT:-5514}
+      SYSLOG_TCP_PORT: ${SYSLOG_TCP_PORT:-5514}
+      OBSERVABILITY_AI_ENABLED: ${OBSERVABILITY_AI_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-pro}
+      SNOW_INSTANCE_URL: ${SNOW_INSTANCE_URL:-}
+      SNOW_USERNAME: ${SNOW_USERNAME:-}
+      SNOW_PASSWORD: ${SNOW_PASSWORD:-}
+      SNOW_ASSIGNMENT_GROUP: ${SNOW_ASSIGNMENT_GROUP:-}
+    depends_on:
+      beacyn-db:
+        condition: service_healthy
+    networks:
+      - beacyn-net
+
+  beacyn-db:
+    container_name: beacyn-db
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Password@123}
+      MYSQL_DATABASE: ${DB_NAME:-pulseiq}
+    volumes:
+      - beacyn-mysql-data:/var/lib/mysql
+      - ../docker/mysql-init:/docker-entrypoint-initdb.d:ro
+      - ../../db:/docker-entrypoint-schemas:ro
+    ports:
+      - "${DB_EXPOSE_PORT:-3316}:3306"
+    networks:
+      - beacyn-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  nginx:
+    container_name: beacyn-nginx
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    networks:
+      - beacyn-net
+
+networks:
+  beacyn-net:
+    driver: bridge
+
+volumes:
+  beacyn-mysql-data:
+    driver: local

@@ -41,7 +41,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-startProcess('tsx', ['src/scripts/portal-monitor.ts'], 'portal-monitor');
+startProcess('tsx', ['src/scripts/monitoring/portal-monitor.ts'], 'portal-monitor');
 const vite = startProcess('vite', [], 'vite');
 
 vite.on('exit', (code) => {

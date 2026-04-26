@@ -43,7 +43,7 @@ HELP
       ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Run ./install.sh --help for supported flags." >&2
+      echo "Run ./deployment/install.sh --help for supported flags." >&2
       exit 1
       ;;
   esac
@@ -743,6 +743,47 @@ if [[ $MYSQL_CONN_TEST -eq 0 ]]; then
 else
   log_ok "MySQL connection successful."
 
+  # Detect existing databases and require explicit consent before overwrite.
+  DB_EXISTS_PULSEIQ=0
+  DB_EXISTS_BSA=0
+
+  if mysql -h "$CFG_DB_HOST" -P "$CFG_DB_PORT" -u "$CFG_DB_USER" \
+      ${CFG_DB_PASS:+-p"$CFG_DB_PASS"} \
+      -Nse "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='pulseiq';" \
+      2>/dev/null | grep -q '^pulseiq$'; then
+    DB_EXISTS_PULSEIQ=1
+  fi
+
+  if mysql -h "$CFG_DB_HOST" -P "$CFG_DB_PORT" -u "$CFG_DB_USER" \
+      ${CFG_DB_PASS:+-p"$CFG_DB_PASS"} \
+      -Nse "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='bsa';" \
+      2>/dev/null | grep -q '^bsa$'; then
+    DB_EXISTS_BSA=1
+  fi
+
+  OVERWRITE_DATABASES=false
+  if [[ $DB_EXISTS_PULSEIQ -eq 1 || $DB_EXISTS_BSA -eq 1 ]]; then
+    log_warn "Existing database(s) detected:"
+    [[ $DB_EXISTS_PULSEIQ -eq 1 ]] && log_warn "  - pulseiq"
+    [[ $DB_EXISTS_BSA -eq 1 ]] && log_warn "  - bsa"
+    ln_blank
+    if ask_yn "Overwrite existing databases? This will permanently delete data." "n"; then
+      OVERWRITE_DATABASES=true
+      log_warn "Overwrite approved — existing databases will be dropped and recreated."
+    else
+      log_info "Overwrite declined — existing databases will be preserved."
+      log_info "Installer will run non-destructive schema initialization only."
+    fi
+  fi
+
+  if [[ "$OVERWRITE_DATABASES" == "true" ]]; then
+    log_info "Dropping existing databases…"
+    mysql -h "$CFG_DB_HOST" -P "$CFG_DB_PORT" -u "$CFG_DB_USER" \
+      ${CFG_DB_PASS:+-p"$CFG_DB_PASS"} \
+      -e "DROP DATABASE IF EXISTS \`pulseiq\`; DROP DATABASE IF EXISTS \`bsa\`;" 2>/dev/null
+    log_ok "Existing databases dropped."
+  fi
+
   # Create the bsa database (schema-only, tables created by agent on first connect)
   log_info "Creating 'bsa' database…"
   mysql -h "$CFG_DB_HOST" -P "$CFG_DB_PORT" -u "$CFG_DB_USER" \
@@ -920,8 +961,7 @@ if [[ -z "$BEACYNCTL_AUTO_PATH_VALUE" ]]; then
   fi
 fi
 
-BEACYN_CTL_CMD_FILE="$INSTALL_DIR/.beacynctl-command"
-bash "$INSTALL_DIR/src/scripts/install-beacynctl.sh" \
+bash "$INSTALL_DIR/src/scripts/cli/install-beacynctl.sh" \
   --app-dir "$INSTALL_DIR" \
   --env-file "$ENV_FILE" \
   --service-manager "$SERVICE_MANAGER" \
@@ -937,11 +977,10 @@ bash "$INSTALL_DIR/src/scripts/install-beacynctl.sh" \
   --npm-bin "$NPM_BIN" \
   --auto-path "$BEACYNCTL_AUTO_PATH_VALUE"
 
-if [[ -f "$BEACYN_CTL_CMD_FILE" ]]; then
-  BEACYN_CTL_CMD="$(cat "$BEACYN_CTL_CMD_FILE")"
-else
-  BEACYN_CTL_CMD="$INSTALL_DIR/bin/beacynctl"
-fi
+case ":$PATH:" in
+  *":$INSTALL_DIR/bin:"*) BEACYN_CTL_CMD="beacynctl" ;;
+  *) BEACYN_CTL_CMD="$INSTALL_DIR/bin/beacynctl" ;;
+esac
 
 log_ok "Beacyn management CLI installed: ${BEACYN_CTL_CMD}"
 

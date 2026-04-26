@@ -52,8 +52,8 @@ Run:
 
 ```bash
 cd /Users/atanukumarpal/Documents/Devlopment/uptime
-chmod +x install.sh
-./install.sh
+chmod +x deployment/install.sh
+./deployment/install.sh
 ```
 
 During install, the script creates:
@@ -69,13 +69,13 @@ Installer now supports OS-aware automatic PATH setup **with consent**.
 Example:
 
 ```bash
-BEACYNCTL_AUTO_PATH=true ./install.sh
+BEACYNCTL_AUTO_PATH=true ./deployment/install.sh
 ```
 
 Explicit no-auto mode (CI-safe):
 
 ```bash
-BEACYNCTL_AUTO_PATH=true ./install.sh --no-auto-path
+BEACYNCTL_AUTO_PATH=true ./deployment/install.sh --no-auto-path
 ```
 
 Precedence:
@@ -121,8 +121,8 @@ If any of these directories are in `PATH`, you can run `beacynctl` directly.
 
 Implementation split:
 
-- installer logic: `src/scripts/install-beacynctl.sh`
-- CLI implementation: `src/scripts/beacynctl.sh`
+- installer logic: `src/scripts/cli/install-beacynctl.sh`
+- CLI implementation: `src/scripts/cli/beacynctl.sh`
 
 ## Existing Install (Already Running Beacyn)
 
@@ -132,7 +132,7 @@ Example:
 
 ```bash
 cd /Users/atanukumarpal/Documents/Devlopment/uptime
-BEACYN_INSTALL_DIR=/Users/atanukumarpal/beacyn ./install.sh
+BEACYN_INSTALL_DIR=/Users/atanukumarpal/beacyn ./deployment/install.sh
 ```
 
 After completion, verify:
@@ -150,7 +150,7 @@ If `beacynctl` is not found, run it directly:
 If you see:
 
 ```text
-beacynctl config file not found: /Users/<user>/.beacynctl.env
+beacynctl config file not found: /Users/<user>/<install-dir>/src/scripts/cli/.beacynctl.env
 ```
 
 you are likely running a stale wrapper or old symlink. Use the latest CLI directly:
@@ -375,7 +375,7 @@ beacynctl config validate
 Scopes:
 
 - `--env`: application `.env`
-- `--cli`: `beacynctl` metadata config (`.beacynctl.env`)
+- `--cli`: `beacynctl` metadata config (`src/scripts/cli/.beacynctl.env`)
 - `--all`: both scopes
 
 Safe defaults:

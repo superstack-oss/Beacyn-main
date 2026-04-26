@@ -1,0 +1,224 @@
+# =============================================================================
+# Beacyn — Docker Compose
+#
+# Default (no profile) — app + MySQL, ports exposed to host only
+#   docker compose --env-file .env.docker up -d
+#
+# NGINX profile — add a reverse proxy for private network / LAN exposure
+#   docker compose --env-file .env.docker --profile nginx up -d
+#
+# Cloudflare profile — tunnel to the public internet via Cloudflare
+#   docker compose --env-file .env.docker --profile cloudflare up -d
+#
+# Both at once:
+#   docker compose --env-file .env.docker --profile nginx --profile cloudflare up -d
+#
+# Build:   docker compose --env-file .env.docker build
+# Logs:    docker compose logs -f
+# Stop:    docker compose down
+# Reset:   docker compose down -v   ⚠ deletes DB volume
+
+# HTTP services (frontend + backend) are configured in the Cloudflare Zero Trust 
+# dashboard as public hostnames → http://app:7145 and http://app:5145
+#
+# MySQL TCP tunneling requires a separate Cloudflare Access TCP application 
+# (can't be done via the simple token run command)
+# =============================================================================
+
+# ============================================================
+# Beacyn - Cloudflare Tunnel Exposure Configuration
+# ============================================================
+#
+# Application: MyApp
+#
+# Services:
+#   - Frontend (React)
+#       Port: 7145
+#       Exposure: REQUIRED
+#       Description: User-facing monitoring dashboard
+#
+#   - Backend API
+#       Port: 5145
+#       Exposure: OPTIONAL
+#       Description: API layer (only expose if accessed externally)
+#
+#   - MySQL Database
+#       Port: 3306
+#       Exposure: NEVER
+#       Description: Internal service only (must not be exposed publicly)
+#
+# ------------------------------------------------------------
+# Cloudflare Tunnel Configuration
+#
+# Public/Private Routes:
+#
+#   - Hostname: monitor.yourcompany.com
+#     Service: http://host.docker.internal:7145
+#     Purpose: Frontend access
+#
+#   - Hostname: api.yourcompany.com
+#     Service: http://host.docker.internal:5145
+#     Purpose: Backend API (optional)
+#
+# ------------------------------------------------------------
+# Security (Zero Trust)
+#
+#   - Access Control: ENABLED
+#   - Authentication: Required (SSO / Email)
+#   - Allowed Users:
+#       - *@yourcompany.com
+#
+# ------------------------------------------------------------
+# Architecture Flow
+#
+#   User → Cloudflare Access (Login)
+#        → Cloudflare Tunnel
+#        → Frontend (7145)
+#        → Backend API (5145)
+#        → MySQL (3306 - internal only)
+#
+# ------------------------------------------------------------
+# Notes:
+#
+#   - Do NOT expose MySQL under any condition
+#   - Prefer exposing only frontend when possible
+#   - Backend should remain internal unless explicitly required
+#   - Always enforce Zero Trust policies for private access
+#
+# ============================================================
+
+name: beacyn
+
+services:
+
+  # ── Application ─────────────────────────────────────────────────────────────
+  app:
+    container_name: beacyn-app
+    image: beacyn-app:2.0.1
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5145}
+        VITE_APP_URL:      ${VITE_APP_URL:-http://localhost:7145}
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-5145}:5145"
+      - "${FRONTEND_PORT:-7145}:7145"
+    environment:
+      NODE_ENV:               production
+      EULA_ACCEPTED:          "true"
+      DB_HOST:                beacyn-db
+      DB_PORT:                "3306"
+      DB_USER:                root
+      DB_PASSWORD:            ${MYSQL_ROOT_PASSWORD:-Password@123}
+      DB_NAME:                ${DB_NAME:-pulseiq}
+      INFRA_DB_NAME:          ${INFRA_DB_NAME:-bsa}
+      DB_SSL:                 "false"
+      DB_SSL_REJECT_UNAUTHORIZED: "false"
+      VITE_APP_URL:           ${VITE_APP_URL:-http://localhost:7145}
+      PULSE_API_BASE_URL:     ${VITE_API_BASE_URL:-http://localhost:5145}
+      SNMP_TRAP_ENABLED:      ${SNMP_TRAP_ENABLED:-true}
+      SNMP_TRAP_BIND_HOST:    "0.0.0.0"
+      SNMP_TRAP_PORT:         ${SNMP_TRAP_PORT:-9162}
+      SNMP_COMMUNITY:         ${SNMP_COMMUNITY:-public}
+      SYSLOG_ENABLED:         ${SYSLOG_ENABLED:-true}
+      SYSLOG_BIND_HOST:       "0.0.0.0"
+      SYSLOG_UDP_PORT:        ${SYSLOG_UDP_PORT:-5514}
+      SYSLOG_TCP_PORT:        ${SYSLOG_TCP_PORT:-5514}
+      OBSERVABILITY_AI_ENABLED: ${OBSERVABILITY_AI_ENABLED:-false}
+      OPENAI_API_KEY:           ${OPENAI_API_KEY:-}
+      OPENAI_MODEL:             ${OPENAI_MODEL:-gpt-4o-mini}
+      GEMINI_API_KEY:           ${GEMINI_API_KEY:-}
+      GEMINI_MODEL:             ${GEMINI_MODEL:-gemini-2.5-pro}
+      SNOW_INSTANCE_URL:      ${SNOW_INSTANCE_URL:-}
+      SNOW_USERNAME:          ${SNOW_USERNAME:-}
+      SNOW_PASSWORD:          ${SNOW_PASSWORD:-}
+      SNOW_ASSIGNMENT_GROUP:  ${SNOW_ASSIGNMENT_GROUP:-}
+    depends_on:
+      beacyn-db:
+        condition: service_healthy
+    networks:
+      - beacyn-net
+
+  # ── MySQL 8 ─────────────────────────────────────────────────────────────────
+  beacyn-db:
+    container_name: beacyn-db
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Password@123}
+      MYSQL_DATABASE:      ${DB_NAME:-pulseiq}
+    volumes:
+      - beacyn-mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+      - ../../db:/docker-entrypoint-schemas:ro
+    ports:
+      - "${DB_EXPOSE_PORT:-3316}:3306"
+    networks:
+      - beacyn-net
+    healthcheck:
+      test:         ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval:     10s
+      timeout:      5s
+      retries:      12
+      start_period: 30s
+
+  # ── NGINX — profile: nginx ───────────────────────────────────────────────────
+  # Private / LAN exposure. Proxies:
+  #   http://<host>:80           → frontend (app:7145)
+  #   http://<host>:80/api/      → backend API (app:5145)
+  #   http://<host>:80/health    → backend health (app:5145)
+  # Set NGINX_HTTP_PORT / NGINX_HTTPS_PORT in .env.docker to change host ports.
+  nginx:
+    profiles: [nginx]
+    container_name: beacyn-nginx
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Mount SSL certs (optional). Create the dir even if empty.
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    networks:
+      - beacyn-net
+
+  # ── Cloudflare Tunnel — profile: cloudflare ──────────────────────────────────
+  # Public internet exposure via a zero-trust Cloudflare Tunnel.
+  #
+  # Prerequisites:
+  #   1. Create a tunnel in the Cloudflare Zero Trust dashboard.
+  #   2. Add public hostname routes there:
+  #        app.yourdomain.com  → http://app:7145   (frontend)
+  #        api.yourdomain.com  → http://app:5145   (backend API)
+  #   3. For MySQL TCP access set CLOUDFLARE_TUNNEL_MYSQL=true and configure a
+  #      Cloudflare Access TCP application pointing to beacyn-db:3306.
+  #   4. Copy the tunnel token into .env.docker as CLOUDFLARE_TUNNEL_TOKEN.
+  #
+  # Start with: docker compose --profile cloudflare up -d
+  cloudflared:
+    profiles: [cloudflare]
+    container_name: beacyn-cloudflared
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - app
+    networks:
+      - beacyn-net
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  beacyn-net:
+    driver: bridge
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  beacyn-mysql-data:
+    driver: local

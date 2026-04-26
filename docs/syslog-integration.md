@@ -8,7 +8,7 @@ PulseIQ already has a **fully operational syslog pipeline**. The backend receive
 
 ## What Is Already Built
 
-### Backend listeners (`src/scripts/server.ts`)
+### Backend listeners (`src/scripts/api/server.ts`)
 
 | Component | Detail |
 |---|---|

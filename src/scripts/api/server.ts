@@ -17,10 +17,10 @@ import {
   monitorPortTarget,
   monitorSSLTarget,
   monitorWebsiteTarget,
-} from './monitor-probe';
-import pool from '../lib/db';
-import { runSelfObservabilityAnalysis, type ObservabilityTableStat } from '../observability/self/analyze';
-import { generateObservabilityAIInsight } from '../observability/ai/gemini';
+} from '../monitoring/monitor-probe';
+import pool from '../../lib/db';
+import { runSelfObservabilityAnalysis, type ObservabilityTableStat } from '../../observability/self/analyze';
+import { generateObservabilityAIInsight } from '../../observability/ai/gemini';
 
 const app = express();
 const PORT = 5145;

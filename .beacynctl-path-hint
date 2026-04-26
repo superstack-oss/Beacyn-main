@@ -1,7 +1,0 @@
-Add beacynctl to PATH (manual step):
-
-export PATH="/Users/atanukumarpal/Documents/Devlopment/uptime/bin:$PATH"
-
-Then reload shell:
-source ~/.zshrc    # zsh
-source ~/.bashrc   # bash

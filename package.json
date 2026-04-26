@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "start":                  "tsx src/scripts/start.ts",
-    "dev":                    "tsx src/scripts/dev-launcher.ts",
+    "dev":                    "tsx src/scripts/api/dev-launcher.ts",
     "dev:frontend":           "vite",
-    "server":                 "tsx src/scripts/server.ts",
+    "server":                 "tsx src/scripts/api/server.ts",
     "initdb":                 "tsx db/initDb.ts",
-    "monitor:portal":         "tsx src/scripts/portal-monitor.ts",
+    "monitor:portal":         "tsx src/scripts/monitoring/portal-monitor.ts",
     "build":                  "tsc -b && vite build",
     "lint":                   "eslint .",
     "preview":                "vite preview"

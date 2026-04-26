@@ -31,7 +31,7 @@ Both processes share the same terminal output (stdio: 'inherit'). If Vite exits 
 
 ### `npm run server`
 
-**Entry point:** `src/scripts/server.ts`
+**Entry point:** `src/scripts/api/server.ts`
 
 This is the **Express backend** — a fully standalone Node.js API server. It starts on port **5145**.
 
@@ -264,9 +264,9 @@ cloudflared daemon on your machine
 ```
 npm start
 └── src/scripts/start.ts
-    ├── spawn: tsx src/scripts/server.ts          → backend :5145
-    ├── spawn: vite                                → frontend :7145
-    └── spawn: tsx src/scripts/portalSecurityMonitor.ts  → health monitor
+   ├── spawn: tsx src/scripts/api/server.ts              → backend :5145
+   ├── spawn: vite                                        → frontend :7145
+   └── spawn: tsx src/scripts/monitoring/portal-monitor.ts → health monitor
 ```
 
 All three processes share one terminal, all die together on Ctrl+C, and a banner is printed at boot showing version, URLs, and network address.

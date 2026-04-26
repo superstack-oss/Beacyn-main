@@ -428,9 +428,9 @@ process.on('SIGHUP',  () => shutdown('SIGHUP'));
   const isProduction = process.env.NODE_ENV === 'production';
   const viteArgs = isProduction ? ['preview', '--host'] : [];
 
-  launch('backend',  TSX,  ['src/scripts/server.ts']);
+  launch('backend',  TSX,  ['src/scripts/api/server.ts']);
   launch('frontend', VITE, viteArgs);
-  launch('security', TSX,  ['src/scripts/portal-monitor.ts'], {
+  launch('security', TSX,  ['src/scripts/monitoring/portal-monitor.ts'], {
     PORTAL_MONITOR_RUN_ONCE: process.env.PORTAL_MONITOR_RUN_ONCE ?? 'false',
   });
 })();

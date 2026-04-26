@@ -1,0 +1,49 @@
+# =============================================================================
+# Beacyn - Multi-Stage Containerfile (Podman)
+# =============================================================================
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --engine-strict=false
+
+COPY . .
+
+ARG VITE_API_BASE_URL=http://localhost:5145
+ARG VITE_APP_URL=http://localhost:7145
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_APP_URL=$VITE_APP_URL
+
+RUN npm run build
+
+FROM node:20-alpine AS runtime
+
+LABEL maintainer="Beacyn Labs <support@beacyn.io>"
+LABEL org.opencontainers.image.title="Beacyn"
+LABEL org.opencontainers.image.description="Enterprise Infrastructure Monitoring and Observability"
+LABEL org.opencontainers.image.version="2.0.1"
+
+WORKDIR /app
+RUN apk add --no-cache iputils
+
+COPY package.json package-lock.json ./
+RUN npm ci --engine-strict=false
+
+COPY src/ ./src/
+COPY db/ ./db/
+COPY public/ ./public/
+COPY index.html ./
+COPY tsconfig*.json ./
+COPY vite.config.ts ./
+
+COPY --from=builder /app/dist ./dist/
+
+COPY deployment/podman/podman-entrypoint.sh /podman-entrypoint.sh
+RUN chmod +x /podman-entrypoint.sh
+
+ENV NODE_ENV=production
+ENV EULA_ACCEPTED=true
+
+EXPOSE 5145 7145
+ENTRYPOINT ["/podman-entrypoint.sh"]

@@ -812,9 +812,9 @@ export function monitorWebSocketTarget(url: string): Promise<MonitorResult> {
 
 const resolveProtoPath = () => {
   try {
-    return path.resolve(fileURLToPath(import.meta.url), '../../scripts/health.proto');
+    return path.resolve(path.dirname(fileURLToPath(import.meta.url)), './health.proto');
   } catch {
-    return path.resolve(process.cwd(), 'src/scripts/health.proto');
+    return path.resolve(process.cwd(), 'src/scripts/monitoring/health.proto');
   }
 };
 
