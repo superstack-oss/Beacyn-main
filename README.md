@@ -1,3 +1,5 @@
+![](https://img.shields.io/github/license/bluewave-labs/checkmate)
+
 # Beacyn EMO
 
 Enterprise infrastructure monitoring and observability platform for uptime, services, network, databases, and operations visibility.
