@@ -86,7 +86,8 @@ ensure_path_line() {
 
 AUTO_PATH_APPLIED="false"
 AUTO_PATH_MESSAGE=""
-if [[ "${AUTO_PATH,,}" == "true" || "${AUTO_PATH,,}" == "1" || "${AUTO_PATH,,}" == "yes" ]]; then
+AUTO_PATH_NORMALIZED="$(printf '%s' "$AUTO_PATH" | tr '[:upper:]' '[:lower:]')"
+if [[ "$AUTO_PATH_NORMALIZED" == "true" || "$AUTO_PATH_NORMALIZED" == "1" || "$AUTO_PATH_NORMALIZED" == "yes" ]]; then
   PATH_LINE="export PATH=\"$CLI_DIR:\$PATH\""
   case "$(uname -s)" in
     Darwin)
