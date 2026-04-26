@@ -60,12 +60,64 @@ During install, the script creates:
 
 - `<INSTALL_DIR>/bin/beacynctl`
 
-And attempts to add a command link in one of these locations:
+Installer now supports OS-aware automatic PATH setup **with consent**.
+
+- Interactive install: installer asks whether to auto-add `beacynctl` to PATH.
+- Non-interactive/CI: set `BEACYNCTL_AUTO_PATH=true`.
+- Explicit flag: `--no-auto-path` disables PATH update even if env var is set.
+
+Example:
+
+```bash
+BEACYNCTL_AUTO_PATH=true ./install.sh
+```
+
+Explicit no-auto mode (CI-safe):
+
+```bash
+BEACYNCTL_AUTO_PATH=true ./install.sh --no-auto-path
+```
+
+Precedence:
+
+- `--no-auto-path` overrides `BEACYNCTL_AUTO_PATH=true`.
+
+If you choose not to auto-update PATH, use manual setup below.
+
+Add it manually once:
+
+### macOS (zsh)
+
+```bash
+echo 'export PATH="<INSTALL_DIR>/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### Linux / Debian / RHEL / UNIX (bash)
+
+```bash
+echo 'export PATH="<INSTALL_DIR>/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Windows (PowerShell, current user)
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+	"Path",
+	"$env:Path;<INSTALL_DIR>\\bin",
+	"User"
+)
+```
+
+Restart terminal after PATH updates.
+
+Optional link locations (manual, if preferred):
 
 - `/usr/local/bin/beacynctl`
 - `~/.local/bin/beacynctl`
 
-If that link location is on your `PATH`, you can run `beacynctl` directly.
+If any of these directories are in `PATH`, you can run `beacynctl` directly.
 
 Implementation split:
 
@@ -94,6 +146,20 @@ If `beacynctl` is not found, run it directly:
 ```bash
 /Users/atanukumarpal/beacyn/bin/beacynctl help
 ```
+
+If you see:
+
+```text
+beacynctl config file not found: /Users/<user>/.beacynctl.env
+```
+
+you are likely running a stale wrapper or old symlink. Use the latest CLI directly:
+
+```bash
+/Users/atanukumarpal/beacyn/bin/beacynctl status
+```
+
+then fix PATH to point to `<INSTALL_DIR>/bin` as shown above.
 
 ## Background Service Behavior
 

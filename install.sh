@@ -9,9 +9,45 @@
 #    BEACYN_BRANCH     Branch to clone          (default: main)
 #    BEACYN_INSTALL_DIR  Override install path
 #    EULA_ACCEPTED=true  Skip interactive EULA prompt (CI/automated)
+#    BEACYNCTL_AUTO_PATH=true  Auto-add beacynctl to PATH without prompt
+#
+#  Flags:
+#    --no-auto-path    Disable PATH auto-update (overrides env var)
+#    -h, --help        Show quick installer options
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 IFS=$'\n\t'
+
+NO_AUTO_PATH_FLAG=false
+for arg in "$@"; do
+  case "$arg" in
+    --no-auto-path)
+      NO_AUTO_PATH_FLAG=true
+      ;;
+    -h|--help)
+      cat <<'HELP'
+Beacyn install.sh options
+
+Flags:
+  --no-auto-path    Do not auto-add beacynctl to PATH
+  -h, --help        Show this help
+
+Environment overrides:
+  BEACYN_REPO_URL
+  BEACYN_BRANCH
+  BEACYN_INSTALL_DIR
+  EULA_ACCEPTED
+  BEACYNCTL_AUTO_PATH
+HELP
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Run ./install.sh --help for supported flags." >&2
+      exit 1
+      ;;
+  esac
+done
 
 # ─── Repository ────────────────────────────────────────────────────────────────
 BEACYN_REPO_URL="${BEACYN_REPO_URL:-https://github.com/mackdev25/Beacyn-EMO.git}"
@@ -867,6 +903,23 @@ chmod 644 "$INSTALL_DIR/.eula-accepted"
 # ─── Install Beacyn management CLI ───────────────────────────────────────────
 log_step "Installing Beacyn Management CLI"
 
+BEACYNCTL_AUTO_PATH_VALUE="${BEACYNCTL_AUTO_PATH:-}"
+if [[ "$NO_AUTO_PATH_FLAG" == "true" ]]; then
+  BEACYNCTL_AUTO_PATH_VALUE="false"
+  log_info "Auto PATH update disabled by --no-auto-path flag."
+fi
+if [[ -z "$BEACYNCTL_AUTO_PATH_VALUE" ]]; then
+  if [[ -t 0 ]]; then
+    if ask_yn "Add beacynctl to PATH automatically for your OS?" "y"; then
+      BEACYNCTL_AUTO_PATH_VALUE="true"
+    else
+      BEACYNCTL_AUTO_PATH_VALUE="false"
+    fi
+  else
+    BEACYNCTL_AUTO_PATH_VALUE="false"
+  fi
+fi
+
 BEACYN_CTL_CMD_FILE="$INSTALL_DIR/.beacynctl-command"
 bash "$INSTALL_DIR/src/scripts/install-beacynctl.sh" \
   --app-dir "$INSTALL_DIR" \
@@ -881,7 +934,8 @@ bash "$INSTALL_DIR/src/scripts/install-beacynctl.sh" \
   --backend-url "$BACKEND_URL" \
   --frontend-port "$CFG_FRONTEND_PORT" \
   --backend-port "$CFG_BACKEND_PORT" \
-  --npm-bin "$NPM_BIN"
+  --npm-bin "$NPM_BIN" \
+  --auto-path "$BEACYNCTL_AUTO_PATH_VALUE"
 
 if [[ -f "$BEACYN_CTL_CMD_FILE" ]]; then
   BEACYN_CTL_CMD="$(cat "$BEACYN_CTL_CMD_FILE")"

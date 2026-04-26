@@ -14,6 +14,7 @@ BACKEND_URL=""
 FRONTEND_PORT="7145"
 BACKEND_PORT="5145"
 NPM_BIN="npm"
+AUTO_PATH="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,6 +31,7 @@ while [[ $# -gt 0 ]]; do
     --frontend-port) FRONTEND_PORT="$2"; shift ;;
     --backend-port) BACKEND_PORT="$2"; shift ;;
     --npm-bin) NPM_BIN="$2"; shift ;;
+    --auto-path) AUTO_PATH="$2"; shift ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
   shift
@@ -44,6 +46,7 @@ CLI_DIR="$APP_DIR/bin"
 CLI_PATH="$CLI_DIR/beacynctl"
 CLI_CONFIG="$APP_DIR/.beacynctl.env"
 CLI_CMD_FILE="$APP_DIR/.beacynctl-command"
+CLI_PATH_HINT_FILE="$APP_DIR/.beacynctl-path-hint"
 PID_FILE="$APP_DIR/.beacyn.pid"
 
 [[ -f "$CLI_SOURCE" ]] || { echo "beacynctl source not found: $CLI_SOURCE" >&2; exit 1; }
@@ -71,23 +74,88 @@ NPM_BIN=$NPM_BIN
 EOF
 chmod 600 "$CLI_CONFIG"
 
-BEACYN_CTL_LINK=""
-if [[ -w /usr/local/bin ]] || { [[ ! -e /usr/local/bin ]] && [[ -w /usr/local ]]; }; then
-  mkdir -p /usr/local/bin
-  ln -sf "$CLI_PATH" /usr/local/bin/beacynctl
-  BEACYN_CTL_LINK="/usr/local/bin/beacynctl"
-elif [[ -w "$HOME/.local/bin" ]] || { [[ ! -e "$HOME/.local/bin" ]] && [[ -w "$HOME" ]]; }; then
-  mkdir -p "$HOME/.local/bin"
-  ln -sf "$CLI_PATH" "$HOME/.local/bin/beacynctl"
-  BEACYN_CTL_LINK="$HOME/.local/bin/beacynctl"
-fi
+ensure_path_line() {
+  local profile_file="$1"
+  local line="$2"
+  mkdir -p "$(dirname "$profile_file")"
+  touch "$profile_file"
+  if ! grep -Fq "$line" "$profile_file"; then
+    printf '\n%s\n' "$line" >> "$profile_file"
+  fi
+}
 
-BEACYN_CTL_CMD="${CLI_PATH/#$HOME/~}"
-if [[ -n "$BEACYN_CTL_LINK" ]]; then
-  case ":$PATH:" in
-    *":$(dirname "$BEACYN_CTL_LINK"):"*) BEACYN_CTL_CMD="beacynctl" ;;
-    *) BEACYN_CTL_CMD="${BEACYN_CTL_LINK/#$HOME/~}" ;;
+AUTO_PATH_APPLIED="false"
+AUTO_PATH_MESSAGE=""
+if [[ "${AUTO_PATH,,}" == "true" || "${AUTO_PATH,,}" == "1" || "${AUTO_PATH,,}" == "yes" ]]; then
+  PATH_LINE="export PATH=\"$CLI_DIR:\$PATH\""
+  case "$(uname -s)" in
+    Darwin)
+      if [[ "${SHELL:-}" == *"zsh"* ]]; then
+        ensure_path_line "$HOME/.zshrc" "$PATH_LINE"
+        AUTO_PATH_APPLIED="true"
+        AUTO_PATH_MESSAGE="Added to ~/.zshrc"
+      else
+        ensure_path_line "$HOME/.bashrc" "$PATH_LINE"
+        AUTO_PATH_APPLIED="true"
+        AUTO_PATH_MESSAGE="Added to ~/.bashrc"
+      fi
+      export PATH="$CLI_DIR:$PATH"
+      ;;
+    Linux)
+      if [[ "${SHELL:-}" == *"zsh"* ]]; then
+        ensure_path_line "$HOME/.zshrc" "$PATH_LINE"
+        AUTO_PATH_APPLIED="true"
+        AUTO_PATH_MESSAGE="Added to ~/.zshrc"
+      else
+        ensure_path_line "$HOME/.bashrc" "$PATH_LINE"
+        AUTO_PATH_APPLIED="true"
+        AUTO_PATH_MESSAGE="Added to ~/.bashrc"
+      fi
+      export PATH="$CLI_DIR:$PATH"
+      ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+          "\$p=[Environment]::GetEnvironmentVariable('Path','User'); if(-not \$p){\$p=''}; if(\$p -notlike '*$CLI_DIR*'){[Environment]::SetEnvironmentVariable('Path',\$p + ';$CLI_DIR','User')}" \
+          >/dev/null 2>&1 || true
+        AUTO_PATH_APPLIED="true"
+        AUTO_PATH_MESSAGE="Added to User PATH (Windows). Restart terminal."
+      else
+        AUTO_PATH_MESSAGE="Auto PATH requested but powershell.exe is unavailable."
+      fi
+      ;;
+    *)
+      AUTO_PATH_MESSAGE="Auto PATH requested but OS is not auto-configured."
+      ;;
   esac
 fi
 
+BEACYN_CTL_CMD="${CLI_PATH/#$HOME/~}"
+case ":$PATH:" in
+  *":$CLI_DIR:"*) BEACYN_CTL_CMD="beacynctl" ;;
+esac
+
+cat > "$CLI_PATH_HINT_FILE" <<EOF
+Add beacynctl to PATH (manual step):
+
+export PATH="$CLI_DIR:\$PATH"
+
+Then reload shell:
+source ~/.zshrc    # zsh
+source ~/.bashrc   # bash
+EOF
+
 echo "$BEACYN_CTL_CMD" > "$CLI_CMD_FILE"
+
+echo "beacynctl installed at: $CLI_PATH"
+if [[ "$AUTO_PATH_APPLIED" == "true" ]]; then
+  echo "PATH update: $AUTO_PATH_MESSAGE"
+  echo "You can now use: beacynctl ..."
+else
+  if [[ -n "$AUTO_PATH_MESSAGE" ]]; then
+    echo "$AUTO_PATH_MESSAGE"
+  fi
+  echo "Global PATH was not modified automatically."
+  echo "To use 'beacynctl' directly, add this to your shell profile:"
+  echo "  export PATH=\"$CLI_DIR:\$PATH\""
+fi
