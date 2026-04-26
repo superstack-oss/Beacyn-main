@@ -19,14 +19,13 @@ import {
   monitorWebsiteTarget,
 } from '../monitoring/monitor-probe';
 import pool from '../../lib/db';
-import { runSelfObservabilityAnalysis, type ObservabilityTableStat } from '../../observability/self/analyze';
+import type { ObservabilityIssue, Severity } from '../../observability/self/analyze';
 import { generateObservabilityAIInsight } from '../../observability/ai/gemini';
 
 const app = express();
 const PORT = 5145;
 const execFileAsync = promisify(execFile);
 const DB_MONITOR_STALE_AFTER_SEC = Math.max(60, Number(process.env.DB_MONITOR_STALE_AFTER_SEC || 180));
-const SNMP_STALE_AFTER_SEC = Math.max(120, Number(process.env.SNMP_STALE_AFTER_SEC || 300));
 const SNMP_DEFAULT_RETENTION_HOURS = Math.max(1, Number(process.env.SNMP_RETENTION_HOURS || 48));
 const SNMP_POLL_TIMEOUT_MS = Math.max(1000, Number(process.env.SNMP_POLL_TIMEOUT_MS || 8000));
 const SNMP_TRAP_ENABLED = (String(process.env.SNMP_TRAP_ENABLED || 'true').toLowerCase() === 'true');
@@ -41,6 +40,227 @@ const INFRA_DB_NAME = (() => {
   const candidate = String(process.env.INFRA_DB_NAME || 'bsa').trim();
   return /^[A-Za-z0-9_]+$/.test(candidate) ? candidate : 'bsa';
 })();
+const APP_DB_NAME = (() => {
+  const candidate = String(process.env.DB_NAME || 'pulseiq').trim();
+  return /^[A-Za-z0-9_]+$/.test(candidate) ? candidate : 'pulseiq';
+})();
+const OBSERVABILITY_ANALYSIS_CADENCE_SECONDS = 60;
+const OBSERVABILITY_ANALYSIS_CADENCE_MS = OBSERVABILITY_ANALYSIS_CADENCE_SECONDS * 1000;
+const OBSERVABILITY_ANALYSIS_WINDOW_MINUTES = 1;
+const OBSERVABILITY_TELEMETRY_GAP_MINUTES = 60;
+
+const OBS_POLICY = {
+  disruption: {
+    downWeight: 1,
+    degradedWeight: 0.35,
+  },
+  latency: {
+    warningMs: 250,
+    highMs: 600,
+    criticalMs: 1200,
+    spikeMinMs: 350,
+    spikeMultiplier: 1.8,
+    scoreScaleDivisor: 45,
+  },
+  uptime: {
+    warningPct: 99,
+    highRiskPct: 97,
+    criticalPct: 95,
+    anomalyCriticalPct: 90,
+  },
+  flapping: {
+    minSamples: 6,
+    minTransitions: 3,
+  },
+  risk: {
+    minAttentionScore: 22,
+    downPenalty: 65,
+    degradedPenalty: 24,
+    uptimeCriticalPenalty: 30,
+    uptimeWarningPenalty: 12,
+    latencyCriticalPenalty: 28,
+    latencyHighPenalty: 16,
+    incidentPenalty: 16,
+    criticalThreshold: 72,
+    highThreshold: 48,
+  },
+  scoring: {
+    downServicePenalty: 9,
+    degradedServicePenalty: 3,
+    networkLatencyCap: 24,
+    alertCap: 18,
+    criticalInfraCap: 20,
+    containerStressCap: 12,
+    syslogCap: 12,
+  },
+  heat: {
+    disruptionWeight: 0.6,
+    diagnosticsWeight: 2.2,
+    infraWeight: 2.4,
+    latencyDivisor: 35,
+    criticalThreshold: 75,
+    highThreshold: 50,
+    moderateThreshold: 25,
+  },
+} as const;
+
+type CachedObservabilityPayload = {
+  generatedAt: string;
+  nextAnalysisAt: string;
+  analysisWindowMinutes: number;
+  placeholder: {
+    isEmpty: boolean;
+    title: string;
+    message: string;
+  };
+  summary: {
+    overallInfrastructureScore: number;
+    overallServiceDisruptionPct: number;
+    avgNetworkLatencyMs: number;
+    peakNetworkLatencyMs: number;
+    operationalSignalHeat: 'low' | 'moderate' | 'high' | 'critical';
+    entitiesMonitored: number;
+    entitiesNeedingAttention: number;
+    activeIncidents: number;
+    entitiesWithTelemetry: number;
+    entitiesWithTelemetryGap: number;
+  };
+  operationalSignals: {
+    downMonitorEvents1h: number;
+    openDiagnosticAlerts: number;
+    criticalInfrastructureEvents1h: number;
+    highContainerStressEvents1h: number;
+    snmpTrapBurstEvents1h: number;
+    criticalSyslogEvents1h: number;
+  };
+  serviceDomains: Array<{
+    domain: string;
+    healthy: number;
+    degraded: number;
+    down: number;
+    avgUptimePct: number;
+    avgResponseMs: number;
+  }>;
+  entitiesNeedingAttention: Array<{
+    id: string;
+    name: string;
+    domain: string;
+    status: string;
+    riskLevel: 'critical' | 'high' | 'medium';
+    riskScore: number;
+    likelyCause: string;
+    predictedRisk: string;
+    lastCheckedAt: string | null;
+  }>;
+  anomalies: Array<{
+    id: string;
+    severity: 'critical' | 'warning' | 'info';
+    title: string;
+    detail: string;
+    domain: string;
+    confidence: number;
+  }>;
+  predictions: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    horizon: string;
+    confidence: number;
+  }>;
+  observations: string[];
+  issues: ObservabilityIssue[];
+  highlights: {
+    immediateAttention: string[];
+    painPoints: string[];
+    keyFindings: string[];
+  };
+};
+
+let observabilityCache: {
+  expiresAt: number;
+  payload: CachedObservabilityPayload;
+} | null = null;
+
+let observabilityAiCache: {
+  expiresAt: number;
+  generatedAt: string;
+  result: {
+    enabled: boolean;
+    used: boolean;
+    provider: 'gemini' | 'openai';
+    summary: string | null;
+    error: string | null;
+  };
+} | null = null;
+
+const INTERNAL_TOKEN_PATTERNS: RegExp[] = [
+  /\b(?:pulseiq|bsa)\.[a-z0-9_]+\b/gi,
+  /\b(?:database_monitor_logs|diagnostics_alert_events|diagnostics_alert_rules|diagnostics_snapshots|health_checks|monitor_logs|snmp_telemetry_samples|snmp_traps|syslog_events|disk_metrics|docker_container_stats|health_events|metric_snapshots|network_interfaces|status_pages|data_center_capacity|data_center_connectivity)\b/gi,
+];
+
+const SENSITIVE_VALUE_PATTERNS: RegExp[] = [
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+  /\b[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\b/gi,
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+  /\b(?:serial|device|agent|asset|user|username|email|token|secret|password|apikey|api[_-]?key|auth[_-]?key|priv[_-]?key|id)\s*[:=\-#]*\s*[a-z0-9_.:@-]{4,}\b/gi,
+];
+
+function sanitizeCustomerFacingText(value: string): string {
+  let text = String(value || '');
+  for (const pattern of INTERNAL_TOKEN_PATTERNS) {
+    text = text.replace(pattern, 'internal source');
+  }
+  for (const pattern of SENSITIVE_VALUE_PATTERNS) {
+    text = text.replace(pattern, '[redacted]');
+  }
+  return text.replace(/\s{2,}/g, ' ').trim();
+}
+
+function sanitizeCustomerFacingPayload<T>(input: T): T {
+  if (input == null) return input;
+  if (typeof input === 'string') return sanitizeCustomerFacingText(input) as unknown as T;
+  if (Array.isArray(input)) return input.map((item) => sanitizeCustomerFacingPayload(item)) as unknown as T;
+  if (typeof input === 'object') {
+    const obj = input as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      out[key] = sanitizeCustomerFacingPayload(value);
+    }
+    return out as T;
+  }
+  return input;
+}
+
+async function getAdminSettingsSnapshot() {
+  const defaults = {
+    aiEnabled: false,
+    aiAnalysisIntervalSeconds: 900,
+  };
+
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT settings_json FROM app_settings WHERE scope_key = 'admin' LIMIT 1`
+    );
+    const raw = rows?.[0]?.settings_json;
+    let parsed: Record<string, any> = {};
+    if (typeof raw === 'string') {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = {};
+      }
+    } else if (raw && typeof raw === 'object') {
+      parsed = raw;
+    }
+
+    return {
+      aiEnabled: String(parsed.aiEnabled ?? defaults.aiEnabled).toLowerCase() === 'true' || parsed.aiEnabled === true,
+      aiAnalysisIntervalSeconds: Math.max(60, Number(parsed.aiAnalysisIntervalSeconds || 0) || defaults.aiAnalysisIntervalSeconds),
+    };
+  } catch {
+    return defaults;
+  }
+}
 
 let infraSchemaAvailabilityCache: { value: boolean; checkedAt: number } | null = null;
 
@@ -297,6 +517,7 @@ const ADMIN_DEFAULTS: Record<string, any> = {
   aiModel: 'gpt-4.1-mini',
   aiBaseUrl: '',
   aiApiKey: '',
+  aiAnalysisIntervalSeconds: 900,
   sessionTimeout: '60',
   mfa: false,
   allowAllDomains: true,
@@ -642,262 +863,634 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
-app.get('/api/observability/summary', async (_req, res) => {
-  const generatedAt = new Date().toISOString();
+app.get('/api/observability/summary', async (req, res) => {
+  const forceRefresh = ['1', 'true', 'yes'].includes(String(req.query.force || '').toLowerCase());
+  const aiRequested = ['1', 'true', 'yes'].includes(String(req.query.ai || '').toLowerCase());
+  const nowMs = Date.now();
+
+  const rankSeverity = (severity: Severity) => {
+    if (severity === 'critical') return 3;
+    if (severity === 'warning') return 2;
+    return 1;
+  };
+
+  const normalizeDomain = (value: string) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'servers') return 'Infrastructure';
+    if (normalized === 'storage') return 'Storage';
+    if (normalized === 'vms') return 'Virtual Machines';
+    if (normalized === 'san') return 'SAN';
+    if (normalized === 'database') return 'Database';
+    return 'Uptime';
+  };
+
+  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
   const queryOne = async (sql: string, params: any[] = []) => {
     const [rows]: any = await pool.query(sql, params);
     return rows?.[0] || {};
   };
 
-  const checkTable = async (tableName: string) => {
+  const checkTable = async (databaseName: string, tableName: string) => {
     const [rows]: any = await pool.query(
       `SELECT COUNT(*) AS cnt
        FROM information_schema.tables
-       WHERE table_schema = DATABASE() AND table_name = ?`,
-      [tableName]
+       WHERE table_schema = ? AND table_name = ?`,
+      [databaseName, tableName]
     );
     return Number(rows?.[0]?.cnt || 0) > 0;
   };
 
-  const safeTableStats = async (
-    tableName: string,
-    countSql: string,
-    countParams: any[],
-    maxTsSql: string,
-    maxTsParams: any[],
-    notes: string[] = []
-  ): Promise<ObservabilityTableStat> => {
-    const exists = await checkTable(tableName);
-    if (!exists) {
-      return {
-        name: tableName,
-        available: false,
-        count1h: 0,
-        lastSeenAt: null,
-        notes: ['Table missing in current schema.'],
+  try {
+    const actor = getSessionUser(req);
+    const isAdminActor = !!actor && (actor.role === 'admin' || actor.role === 'superuser');
+    const adminSettings = await getAdminSettingsSnapshot();
+
+    if (aiRequested && !isAdminActor) {
+      return res.status(403).json({ error: 'Only admins can initiate AI analysis.' });
+    }
+
+    let payload: CachedObservabilityPayload;
+
+    if (!forceRefresh && observabilityCache && observabilityCache.expiresAt > nowMs) {
+      payload = observabilityCache.payload;
+    } else {
+      const generatedAt = new Date().toISOString();
+      const nextAnalysisAt = new Date(new Date(generatedAt).getTime() + OBSERVABILITY_ANALYSIS_CADENCE_MS).toISOString();
+
+      const allServices = await getStatusPageServices([...STATUS_PAGE_COMPONENTS]);
+      const services = allServices.filter((service) => String(service.id || '').startsWith('asset:'));
+      const totalServices = services.length;
+      const entitiesWithAnyTelemetry = services.filter((service) => {
+        const hasHistory = Array.isArray(service.history) && service.history.length > 0;
+        const hasLastSeen = !!service.lastCheckedAt;
+        return hasHistory || hasLastSeen;
+      }).length;
+      const entitiesWithoutTelemetry = Math.max(0, totalServices - entitiesWithAnyTelemetry);
+
+      const telemetryGapMinutes = OBSERVABILITY_TELEMETRY_GAP_MINUTES;
+      const entitiesWithTelemetryGap = services.filter((service) => {
+        const hasHistory = Array.isArray(service.history) && service.history.length > 0;
+        const hasLastSeen = !!service.lastCheckedAt;
+        if (!hasHistory && !hasLastSeen) return false;
+        if (!service.lastCheckedAt) return false;
+        const lastSeenMs = new Date(service.lastCheckedAt).getTime();
+        if (!Number.isFinite(lastSeenMs)) return false;
+        const gapMinutes = Math.floor((nowMs - lastSeenMs) / (60 * 1000));
+        return gapMinutes > telemetryGapMinutes;
+      });
+
+      const downServices = services.filter((item) => String(item.status || '').toLowerCase() === 'down').length;
+      const degradedServices = services.filter((item) => {
+        const status = String(item.status || '').toLowerCase();
+        return status !== 'online' && status !== 'down';
+      }).length;
+      const healthyServices = Math.max(0, totalServices - downServices - degradedServices);
+
+      const serviceDisruptionPct = totalServices
+        ? Number((((downServices * OBS_POLICY.disruption.downWeight + degradedServices * OBS_POLICY.disruption.degradedWeight) / totalServices) * 100).toFixed(1))
+        : 0;
+
+      const hasHealthChecks = await checkTable(APP_DB_NAME, 'health_checks');
+      const hasMonitorLogs = await checkTable(APP_DB_NAME, 'monitor_logs');
+      const hasDiagAlerts = await checkTable(APP_DB_NAME, 'diagnostics_alert_events');
+      const hasSnmpTraps = await checkTable(APP_DB_NAME, 'snmp_traps');
+      const hasSyslogEvents = await checkTable(APP_DB_NAME, 'syslog_events');
+      const hasBsaHealthEvents = await checkTable(INFRA_DB_NAME, 'health_events');
+      const hasBsaContainerStats = await checkTable(INFRA_DB_NAME, 'docker_container_stats');
+
+      const appDbRef = `\`${APP_DB_NAME}\``;
+      const infraDbRef = `\`${INFRA_DB_NAME}\``;
+
+      let avgNetworkLatencyMs = 0;
+      let peakNetworkLatencyMs = 0;
+      if (hasHealthChecks) {
+        const row = await queryOne(
+          `SELECT AVG(network_latency_ms) AS avg_latency, MAX(network_latency_ms) AS peak_latency
+           FROM ${appDbRef}.health_checks
+           WHERE checked_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR
+             AND network_latency_ms IS NOT NULL`
+        );
+        avgNetworkLatencyMs = Number(row?.avg_latency || 0);
+        peakNetworkLatencyMs = Number(row?.peak_latency || 0);
+      }
+
+      let downMonitorEvents1h = 0;
+      if (hasMonitorLogs) {
+        const row = await queryOne(
+          `SELECT COUNT(*) AS down_count
+           FROM ${appDbRef}.monitor_logs
+           WHERE timestamp >= UTC_TIMESTAMP() - INTERVAL 1 HOUR
+             AND LOWER(status) = 'down'`
+        );
+        downMonitorEvents1h = Number(row?.down_count || 0);
+      }
+
+      let openDiagnosticAlerts = 0;
+      if (hasDiagAlerts) {
+        const row = await queryOne(
+          `SELECT COUNT(*) AS open_count
+           FROM ${appDbRef}.diagnostics_alert_events
+           WHERE status = 'Open'`
+        );
+        openDiagnosticAlerts = Number(row?.open_count || 0);
+      }
+
+      let snmpTrapBurstEvents1h = 0;
+      if (hasSnmpTraps) {
+        const row = await queryOne(
+          `SELECT COUNT(*) AS cnt
+           FROM ${appDbRef}.snmp_traps
+           WHERE received_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`
+        );
+        snmpTrapBurstEvents1h = Number(row?.cnt || 0);
+      }
+
+      let criticalSyslogEvents1h = 0;
+      if (hasSyslogEvents) {
+        const row = await queryOne(
+          `SELECT COUNT(*) AS cnt
+           FROM ${appDbRef}.syslog_events
+           WHERE received_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR
+             AND (
+               severity_label = 'critical'
+               OR severity <= 2
+             )`
+        );
+        criticalSyslogEvents1h = Number(row?.cnt || 0);
+      }
+
+      let criticalInfrastructureEvents1h = 0;
+      if (hasBsaHealthEvents) {
+        const row = await queryOne(
+          `SELECT COUNT(*) AS cnt
+           FROM ${infraDbRef}.health_events
+           WHERE captured_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR
+             AND severity = 'critical'`
+        );
+        criticalInfrastructureEvents1h = Number(row?.cnt || 0);
+      }
+
+      let highContainerStressEvents1h = 0;
+      if (hasBsaContainerStats) {
+        const row = await queryOne(
+          `SELECT COUNT(*) AS cnt
+           FROM ${infraDbRef}.docker_container_stats
+           WHERE captured_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR
+             AND (
+               IFNULL(cpu_percent, 0) >= 90
+               OR IFNULL(memory_percent, 0) >= 90
+             )`
+        );
+        highContainerStressEvents1h = Number(row?.cnt || 0);
+      }
+
+      const serviceDomains = Array.from(
+        services.reduce((map, service) => {
+          const domain = normalizeDomain(service.group);
+          const current = map.get(domain) || {
+            domain,
+            healthy: 0,
+            degraded: 0,
+            down: 0,
+            uptimeValues: [] as number[],
+            responseValues: [] as number[],
+          };
+
+          const status = String(service.status || '').toLowerCase();
+          if (status === 'down') current.down += 1;
+          else if (status === 'online') current.healthy += 1;
+          else current.degraded += 1;
+
+          if (Number.isFinite(service.uptimePct)) current.uptimeValues.push(Number(service.uptimePct));
+          if (Number.isFinite(service.avgResponseMs)) current.responseValues.push(Number(service.avgResponseMs));
+
+          map.set(domain, current);
+          return map;
+        }, new Map<string, {
+          domain: string;
+          healthy: number;
+          degraded: number;
+          down: number;
+          uptimeValues: number[];
+          responseValues: number[];
+        }>()).values()
+      ).map((item) => ({
+        domain: item.domain,
+        healthy: item.healthy,
+        degraded: item.degraded,
+        down: item.down,
+        avgUptimePct: item.uptimeValues.length
+          ? Number((item.uptimeValues.reduce((sum, value) => sum + value, 0) / item.uptimeValues.length).toFixed(1))
+          : 100,
+        avgResponseMs: item.responseValues.length
+          ? Math.round(item.responseValues.reduce((sum, value) => sum + value, 0) / item.responseValues.length)
+          : 0,
+      }));
+
+      const entitiesNeedingAttention = services
+        .map((service) => {
+          const reasons: string[] = [];
+          const status = String(service.status || '').toLowerCase();
+          let riskScore = 0;
+
+          if (status === 'down') {
+            riskScore += OBS_POLICY.risk.downPenalty;
+            reasons.push('Service is currently down.');
+          } else if (status !== 'online') {
+            riskScore += OBS_POLICY.risk.degradedPenalty;
+            reasons.push('Service is degraded.');
+          }
+
+          if (service.uptimePct < OBS_POLICY.uptime.criticalPct) {
+            riskScore += OBS_POLICY.risk.uptimeCriticalPenalty;
+            reasons.push(`Uptime dropped to ${service.uptimePct.toFixed(1)}%.`);
+          } else if (service.uptimePct < OBS_POLICY.uptime.warningPct) {
+            riskScore += OBS_POLICY.risk.uptimeWarningPenalty;
+            reasons.push(`Uptime is trending low at ${service.uptimePct.toFixed(1)}%.`);
+          }
+
+          const responseMs = Number(service.avgResponseMs || 0);
+          if (responseMs >= OBS_POLICY.latency.criticalMs) {
+            riskScore += OBS_POLICY.risk.latencyCriticalPenalty;
+            reasons.push('High response latency detected.');
+          } else if (responseMs >= OBS_POLICY.latency.highMs) {
+            riskScore += OBS_POLICY.risk.latencyHighPenalty;
+            reasons.push('Response latency is elevated.');
+          }
+
+          if (service.incident) {
+            riskScore += OBS_POLICY.risk.incidentPenalty;
+            reasons.push('Recent incident or disruption observed.');
+          }
+
+          if (riskScore < OBS_POLICY.risk.minAttentionScore) return null;
+
+          const riskLevel: 'critical' | 'high' | 'medium' = riskScore >= OBS_POLICY.risk.criticalThreshold
+            ? 'critical'
+            : riskScore >= OBS_POLICY.risk.highThreshold
+              ? 'high'
+              : 'medium';
+
+          const predictedRisk = status === 'down'
+            ? 'High chance of continued disruption in the next 60 minutes without intervention.'
+            : riskScore >= 60
+              ? 'Likely to degrade further in the next 60 minutes if trend continues.'
+              : 'Monitor closely; potential instability in the next 60 minutes.';
+
+          return {
+            id: service.id,
+            name: service.name,
+            domain: normalizeDomain(service.group),
+            status: service.status,
+            riskLevel,
+            riskScore: clamp(Math.round(riskScore), 0, 100),
+            likelyCause: reasons[0] || 'Performance instability detected.',
+            predictedRisk,
+            lastCheckedAt: service.lastCheckedAt || null,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => !!item)
+        .sort((a, b) => b.riskScore - a.riskScore)
+        .slice(0, 12);
+
+      const anomalies: CachedObservabilityPayload['anomalies'] = [];
+      for (const service of services.slice(0, 80)) {
+        const responseSeries = Array.isArray(service.responseHistory) ? service.responseHistory : [];
+        const latestResponse = responseSeries.length ? responseSeries[responseSeries.length - 1] : 0;
+        const responseAvg = responseSeries.length
+          ? responseSeries.reduce((sum, value) => sum + value, 0) / responseSeries.length
+          : 0;
+
+        if (
+          responseSeries.length >= OBS_POLICY.flapping.minSamples
+          && latestResponse > OBS_POLICY.latency.spikeMinMs
+          && latestResponse > responseAvg * OBS_POLICY.latency.spikeMultiplier
+        ) {
+          anomalies.push({
+            id: `latency-spike:${service.id}`,
+            severity: latestResponse > OBS_POLICY.latency.criticalMs ? 'critical' : 'warning',
+            title: `Latency spike on ${service.name}`,
+            detail: `Response latency increased to ${Math.round(latestResponse)}ms from a recent average near ${Math.round(responseAvg)}ms.`,
+            domain: normalizeDomain(service.group),
+            confidence: latestResponse > OBS_POLICY.latency.criticalMs ? 87 : 79,
+          });
+        }
+
+        const statusSeq = Array.isArray(service.history) ? service.history.map((entry) => (entry.down ? 'down' : 'up')) : [];
+        let flips = 0;
+        for (let i = 1; i < statusSeq.length; i += 1) {
+          if (statusSeq[i] !== statusSeq[i - 1]) flips += 1;
+        }
+        if (statusSeq.length >= OBS_POLICY.flapping.minSamples && flips >= OBS_POLICY.flapping.minTransitions) {
+          anomalies.push({
+            id: `flapping:${service.id}`,
+            severity: 'warning',
+            title: `Flapping behaviour on ${service.name}`,
+            detail: `Service status changed ${flips} times in recent checks, indicating instability.`,
+            domain: normalizeDomain(service.group),
+            confidence: 78,
+          });
+        }
+
+        if (service.uptimePct < OBS_POLICY.uptime.highRiskPct) {
+          anomalies.push({
+            id: `uptime-drop:${service.id}`,
+            severity: service.uptimePct < OBS_POLICY.uptime.anomalyCriticalPct ? 'critical' : 'warning',
+            title: `Uptime degradation on ${service.name}`,
+            detail: `Observed uptime is ${service.uptimePct.toFixed(1)}% in recent samples.`,
+            domain: normalizeDomain(service.group),
+            confidence: service.uptimePct < OBS_POLICY.uptime.anomalyCriticalPct ? 90 : 84,
+          });
+        }
+      }
+
+      if (criticalInfrastructureEvents1h > 0) {
+        anomalies.push({
+          id: 'infra-critical-events',
+          severity: criticalInfrastructureEvents1h >= 8 ? 'critical' : 'warning',
+          title: 'Critical infrastructure events detected',
+          detail: `${criticalInfrastructureEvents1h} critical infrastructure events were raised in the last hour.`,
+          domain: 'Infrastructure',
+          confidence: 84,
+        });
+      }
+
+      const predictions: CachedObservabilityPayload['predictions'] = [];
+      for (const entity of entitiesNeedingAttention.slice(0, 8)) {
+        const predictedConfidence = entity.riskScore >= OBS_POLICY.risk.criticalThreshold
+          ? 88
+          : entity.riskScore >= OBS_POLICY.risk.highThreshold
+            ? 79
+            : 69;
+        predictions.push({
+          id: `prediction:${entity.id}`,
+          title: `${entity.name} risk outlook`,
+          detail: entity.predictedRisk,
+          horizon: 'Next 60 minutes',
+          confidence: predictedConfidence,
+        });
+      }
+
+      const activeIncidents = downServices + (openDiagnosticAlerts > 0 ? 1 : 0) + (criticalInfrastructureEvents1h > 0 ? 1 : 0);
+      const weightedIncidentPenalty =
+        downServices * OBS_POLICY.scoring.downServicePenalty
+        + degradedServices * OBS_POLICY.scoring.degradedServicePenalty
+        + clamp(Math.round(avgNetworkLatencyMs / OBS_POLICY.latency.scoreScaleDivisor), 0, OBS_POLICY.scoring.networkLatencyCap)
+        + clamp(Math.round(openDiagnosticAlerts * OBS_POLICY.heat.diagnosticsWeight), 0, OBS_POLICY.scoring.alertCap)
+        + clamp(Math.round(criticalInfrastructureEvents1h * OBS_POLICY.heat.infraWeight), 0, OBS_POLICY.scoring.criticalInfraCap)
+        + clamp(highContainerStressEvents1h, 0, OBS_POLICY.scoring.containerStressCap)
+        + clamp(criticalSyslogEvents1h, 0, OBS_POLICY.scoring.syslogCap);
+
+      const overallInfrastructureScore = clamp(100 - weightedIncidentPenalty, 0, 100);
+
+      const heatScore = clamp(
+        Math.round(
+          serviceDisruptionPct * OBS_POLICY.heat.disruptionWeight
+          + openDiagnosticAlerts * OBS_POLICY.heat.diagnosticsWeight
+          + criticalInfrastructureEvents1h * OBS_POLICY.heat.infraWeight
+          + (avgNetworkLatencyMs / OBS_POLICY.heat.latencyDivisor)
+        ),
+        0,
+        100
+      );
+
+      const operationalSignalHeat: CachedObservabilityPayload['summary']['operationalSignalHeat'] = heatScore >= OBS_POLICY.heat.criticalThreshold
+        ? 'critical'
+        : heatScore >= OBS_POLICY.heat.highThreshold
+          ? 'high'
+          : heatScore >= OBS_POLICY.heat.moderateThreshold
+            ? 'moderate'
+            : 'low';
+
+      const issues: ObservabilityIssue[] = [];
+
+      for (const entity of entitiesNeedingAttention.slice(0, 10)) {
+        issues.push({
+          id: `entity-${entity.id}`,
+          severity: entity.riskLevel === 'critical' ? 'critical' : entity.riskLevel === 'high' ? 'warning' : 'info',
+          source: `${entity.domain}:${entity.name}`,
+          title: `${entity.name} requires attention`,
+          detail: entity.likelyCause,
+          metric: 'risk_score',
+          value: entity.riskScore,
+          threshold: OBS_POLICY.risk.highThreshold,
+        });
+      }
+
+      for (const anomaly of anomalies.slice(0, 10)) {
+        issues.push({
+          id: `anomaly-${anomaly.id}`,
+          severity: anomaly.severity,
+          source: `Anomaly:${anomaly.domain}`,
+          title: anomaly.title,
+          detail: anomaly.detail,
+          metric: 'anomaly_confidence',
+          value: anomaly.confidence,
+          threshold: 70,
+        });
+      }
+
+      issues.sort((a, b) => rankSeverity(b.severity) - rankSeverity(a.severity));
+
+      const observations: string[] = [];
+
+      if (totalServices === 0) {
+        observations.push('No monitored entities are available in inventory yet.');
+      } else {
+        observations.push(`Overall service disruption is ${serviceDisruptionPct.toFixed(1)}% across ${totalServices} monitored entities.`);
+        observations.push(`Average network latency is ${avgNetworkLatencyMs.toFixed(1)}ms with peak ${peakNetworkLatencyMs.toFixed(1)}ms in the last hour.`);
+        observations.push(`${entitiesNeedingAttention.length} entities currently require closer operational attention.`);
+
+        if (entitiesWithoutTelemetry > 0) {
+          observations.push(`${entitiesWithoutTelemetry} monitored entities have not produced telemetry yet.`);
+        }
+        if (entitiesWithTelemetryGap.length > 0) {
+          observations.push(`${entitiesWithTelemetryGap.length} monitored entities show a telemetry gap after previously reporting data.`);
+        }
+        if (anomalies.length) {
+          observations.push(`${anomalies.length} anomaly patterns were detected, including instability and latency spikes.`);
+        }
+      }
+
+      const highlights = {
+        immediateAttention: issues
+          .filter((item) => item.severity === 'critical')
+          .slice(0, 5)
+          .map((item) => `${item.title}: ${item.detail}`),
+        painPoints: [
+          downServices > 0 ? `${downServices} services are currently down.` : '',
+          degradedServices > 0 ? `${degradedServices} services are degraded and may impact user experience.` : '',
+          openDiagnosticAlerts > 0 ? `${openDiagnosticAlerts} diagnostics alerts remain open.` : '',
+          highContainerStressEvents1h > 0 ? `${highContainerStressEvents1h} container stress events were detected in the last hour.` : '',
+        ].filter(Boolean),
+        keyFindings: [
+          `Infrastructure score is ${overallInfrastructureScore}/100.`,
+          `Operational signal heat is ${operationalSignalHeat.toUpperCase()}.`,
+          `${healthyServices} healthy, ${degradedServices} degraded, ${downServices} down services in latest analysis.`,
+        ],
+      };
+
+      if (!highlights.immediateAttention.length) {
+        highlights.immediateAttention.push('No immediate critical service outage requiring escalation right now.');
+      }
+      if (!highlights.painPoints.length) {
+        if (totalServices === 0) {
+          highlights.painPoints.push('No monitored entities have been onboarded to inventory yet.');
+        } else if (entitiesWithAnyTelemetry === 0) {
+          highlights.painPoints.push('Monitored entities are present, but telemetry has not been received yet.');
+        } else {
+          highlights.painPoints.push('No dominant operational pain point detected in the current cycle.');
+        }
+      }
+
+      const placeholder = totalServices === 0
+        ? {
+            isEmpty: true,
+            title: 'No Monitored Entities',
+            message: 'Add devices/services to inventory to begin observability analysis.',
+          }
+        : entitiesWithAnyTelemetry === 0
+          ? {
+              isEmpty: true,
+              title: 'No Telemetry Yet',
+              message: 'Entities exist in inventory, but monitoring data has not been received yet.',
+            }
+          : {
+              isEmpty: false,
+              title: '',
+              message: '',
+            };
+
+      payload = {
+        generatedAt,
+        nextAnalysisAt,
+        analysisWindowMinutes: OBSERVABILITY_ANALYSIS_WINDOW_MINUTES,
+        placeholder,
+        summary: {
+          overallInfrastructureScore,
+          overallServiceDisruptionPct: serviceDisruptionPct,
+          avgNetworkLatencyMs: Number(avgNetworkLatencyMs.toFixed(1)),
+          peakNetworkLatencyMs: Number(peakNetworkLatencyMs.toFixed(1)),
+          operationalSignalHeat,
+          entitiesMonitored: totalServices,
+          entitiesNeedingAttention: entitiesNeedingAttention.length,
+          activeIncidents,
+          entitiesWithTelemetry: entitiesWithAnyTelemetry,
+          entitiesWithTelemetryGap: entitiesWithTelemetryGap.length,
+        },
+        operationalSignals: {
+          downMonitorEvents1h,
+          openDiagnosticAlerts,
+          criticalInfrastructureEvents1h,
+          highContainerStressEvents1h,
+          snmpTrapBurstEvents1h,
+          criticalSyslogEvents1h,
+        },
+        serviceDomains,
+        entitiesNeedingAttention,
+        anomalies: anomalies.slice(0, 20),
+        predictions,
+        observations,
+        issues: issues.slice(0, 20),
+        highlights,
+      };
+
+      observabilityCache = {
+        expiresAt: new Date(nextAnalysisAt).getTime(),
+        payload,
       };
     }
 
-    const countRow = await queryOne(countSql, countParams);
-    const tsRow = await queryOne(maxTsSql, maxTsParams);
+    let aiResult = (adminSettings.aiEnabled && observabilityAiCache?.result)
+      ? observabilityAiCache.result
+      : {
+          enabled: false,
+          used: false,
+          provider: 'openai' as const,
+          summary: null,
+          error: adminSettings.aiEnabled
+            ? 'AI analysis is available but has not been initiated by an admin yet.'
+            : 'AI analysis is disabled in admin settings.',
+        };
 
-    return {
-      name: tableName,
-      available: true,
-      count1h: Number(countRow?.cnt || 0),
-      lastSeenAt: tsRow?.last_seen ? new Date(tsRow.last_seen).toISOString() : null,
-      notes,
-    };
-  };
+    const aiCacheExpired = !observabilityAiCache || observabilityAiCache.expiresAt <= nowMs;
+    const canInitiateAi = aiRequested && isAdminActor && adminSettings.aiEnabled;
 
-  try {
-    const staleSecs = DB_MONITOR_STALE_AFTER_SEC;
+    if (canInitiateAi && aiCacheExpired) {
+      aiResult = await generateObservabilityAIInsight({
+        generatedAt: payload.generatedAt,
+        context: {
+          summary: payload.summary,
+          operationalSignals: payload.operationalSignals,
+          serviceDomains: payload.serviceDomains,
+          entitiesNeedingAttention: payload.entitiesNeedingAttention.slice(0, 8),
+          anomalies: payload.anomalies.slice(0, 10),
+          predictions: payload.predictions.slice(0, 8),
+        },
+        observations: payload.observations,
+        issues: payload.issues,
+      });
 
-    const agentMetrics = await safeTableStats(
-      'agent_metrics',
-      `SELECT COUNT(*) AS cnt FROM agent_metrics WHERE collected_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(collected_at) AS last_seen FROM agent_metrics`,
-      []
-    );
-
-    const databaseMonitor = await safeTableStats(
-      'database_monitor_logs',
-      `SELECT COUNT(*) AS cnt FROM database_monitor_logs WHERE collected_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(collected_at) AS last_seen FROM database_monitor_logs`,
-      []
-    );
-
-    const healthChecks = await safeTableStats(
-      'health_checks',
-      `SELECT COUNT(*) AS cnt FROM health_checks WHERE checked_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(checked_at) AS last_seen FROM health_checks`,
-      []
-    );
-
-    const monitorLogs = await safeTableStats(
-      'monitor_logs',
-      `SELECT COUNT(*) AS cnt FROM monitor_logs WHERE timestamp >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(timestamp) AS last_seen FROM monitor_logs`,
-      []
-    );
-
-    const diagnosticAlerts = await safeTableStats(
-      'diagnostics_alert_events',
-      `SELECT COUNT(*) AS cnt FROM diagnostics_alert_events WHERE triggered_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(triggered_at) AS last_seen FROM diagnostics_alert_events`,
-      []
-    );
-
-    const snmpSamples = await safeTableStats(
-      'snmp_telemetry_samples',
-      `SELECT COUNT(*) AS cnt FROM snmp_telemetry_samples WHERE sample_time >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(sample_time) AS last_seen FROM snmp_telemetry_samples`,
-      []
-    );
-
-    const snmpTraps = await safeTableStats(
-      'snmp_traps',
-      `SELECT COUNT(*) AS cnt FROM snmp_traps WHERE received_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(received_at) AS last_seen FROM snmp_traps`,
-      []
-    );
-
-    let disconnectedDatabases = 0;
-    let avgDbLatencyMs = 0;
-    if (databaseMonitor.available) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS disconnected
-         FROM database_monitor_logs d
-         INNER JOIN (
-           SELECT target_key, MAX(collected_at) AS max_collected
-           FROM database_monitor_logs
-           GROUP BY target_key
-         ) latest ON latest.target_key = d.target_key AND latest.max_collected = d.collected_at
-         WHERE d.status <> 'Connected'
-            OR TIMESTAMPDIFF(SECOND, d.collected_at, UTC_TIMESTAMP()) > ?`,
-        [staleSecs]
-      );
-      disconnectedDatabases = Number(row?.disconnected || 0);
-
-      const latencyRow = await queryOne(
-        `SELECT AVG(latency_ms) AS avg_latency
-         FROM database_monitor_logs
-         WHERE collected_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR AND latency_ms IS NOT NULL`
-      );
-      avgDbLatencyMs = Number(latencyRow?.avg_latency || 0);
+      observabilityAiCache = {
+        generatedAt: new Date().toISOString(),
+        expiresAt: nowMs + adminSettings.aiAnalysisIntervalSeconds * 1000,
+        result: aiResult,
+      };
+    } else if (canInitiateAi && observabilityAiCache) {
+      aiResult = observabilityAiCache.result;
     }
 
-    let unhealthyHealthChecks = 0;
-    if (healthChecks.available) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS unhealthy
-         FROM health_checks
-         WHERE checked_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR AND server_healthy = 0`
-      );
-      unhealthyHealthChecks = Number(row?.unhealthy || 0);
-    }
-
-    let downMonitorEvents = 0;
-    if (monitorLogs.available) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS down_count
-         FROM monitor_logs
-         WHERE timestamp >= UTC_TIMESTAMP() - INTERVAL 1 HOUR AND LOWER(status) = 'down'`
-      );
-      downMonitorEvents = Number(row?.down_count || 0);
-    }
-
-    let openDiagnosticAlerts = 0;
-    if (diagnosticAlerts.available) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS open_count
-         FROM diagnostics_alert_events
-         WHERE status = 'Open'`
-      );
-      openDiagnosticAlerts = Number(row?.open_count || 0);
-    }
-
-    let degradedSnmpDevices = 0;
-    if (await checkTable('snmp_devices')) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS degraded
-         FROM snmp_devices
-         WHERE enabled = 1
-           AND (
-             status <> 'Up'
-             OR last_polled_at IS NULL
-             OR TIMESTAMPDIFF(SECOND, last_polled_at, UTC_TIMESTAMP()) > ?
-           )`,
-        [SNMP_STALE_AFTER_SEC]
-      );
-      degradedSnmpDevices = Number(row?.degraded || 0);
-    }
-
-    let snmpTrapEvents1h = 0;
-    if (snmpTraps.available) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS cnt
-         FROM snmp_traps
-         WHERE received_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`
-      );
-      snmpTrapEvents1h = Number(row?.cnt || 0);
-    }
-
-    const syslogEvents = await safeTableStats(
-      'syslog_events',
-      `SELECT COUNT(*) AS cnt FROM syslog_events WHERE received_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR`,
-      [],
-      `SELECT MAX(received_at) AS last_seen FROM syslog_events`,
-      []
-    );
-
-    let criticalSyslogEvents1h = 0;
-    if (syslogEvents.available) {
-      const row = await queryOne(
-        `SELECT COUNT(*) AS cnt
-         FROM syslog_events
-         WHERE received_at >= UTC_TIMESTAMP() - INTERVAL 1 HOUR
-           AND severity_label = 'critical'`
-      );
-      criticalSyslogEvents1h = Number(row?.cnt || 0);
-    }
-
-    const tables = [agentMetrics, databaseMonitor, healthChecks, monitorLogs, diagnosticAlerts, snmpSamples, snmpTraps, syslogEvents];
-    const dataset = {
-      generatedAt,
-      tables,
-      metrics: {
-        disconnectedDatabases,
-        unhealthyHealthChecks,
-        downMonitorEvents,
-        openDiagnosticAlerts,
-        avgDbLatencyMs,
-        degradedSnmpDevices,
-        snmpTrapEvents1h,
-        criticalSyslogEvents1h,
-      },
-    };
-
-    const selfResult = runSelfObservabilityAnalysis(dataset);
-    const aiResult = await generateObservabilityAIInsight({
-      generatedAt,
-      tables,
-      observations: selfResult.observations,
-      issues: selfResult.issues,
-    });
-
-    res.json({
-      generatedAt,
-      tables,
-      metrics: dataset.metrics,
-      observations: selfResult.observations,
-      issues: selfResult.issues,
+    const safePayload = sanitizeCustomerFacingPayload({
+      ...payload,
       ai: aiResult,
     });
+
+    res.json(safePayload);
   } catch (err: any) {
-    res.status(500).json({
+    const generatedAt = new Date().toISOString();
+    const nextAnalysisAt = new Date(Date.now() + OBSERVABILITY_ANALYSIS_CADENCE_MS).toISOString();
+    const errorPayload = {
       error: err?.message || 'Failed to build observability summary',
       generatedAt,
-      tables: [],
-      metrics: {
-        disconnectedDatabases: 0,
-        unhealthyHealthChecks: 0,
-        downMonitorEvents: 0,
-        openDiagnosticAlerts: 0,
-        avgDbLatencyMs: 0,
-        degradedSnmpDevices: 0,
-        snmpTrapEvents1h: 0,
+      nextAnalysisAt,
+      analysisWindowMinutes: OBSERVABILITY_ANALYSIS_WINDOW_MINUTES,
+      placeholder: {
+        isEmpty: true,
+        title: 'Observability Unavailable',
+        message: 'Observability summary is temporarily unavailable. Please retry shortly.',
       },
+      summary: {
+        overallInfrastructureScore: 0,
+        overallServiceDisruptionPct: 0,
+        avgNetworkLatencyMs: 0,
+        peakNetworkLatencyMs: 0,
+        operationalSignalHeat: 'low',
+        entitiesMonitored: 0,
+        entitiesNeedingAttention: 0,
+        activeIncidents: 0,
+        entitiesWithTelemetry: 0,
+        entitiesWithTelemetryGap: 0,
+      },
+      operationalSignals: {
+        downMonitorEvents1h: 0,
+        openDiagnosticAlerts: 0,
+        criticalInfrastructureEvents1h: 0,
+        highContainerStressEvents1h: 0,
+        snmpTrapBurstEvents1h: 0,
+        criticalSyslogEvents1h: 0,
+      },
+      serviceDomains: [],
+      entitiesNeedingAttention: [],
+      anomalies: [],
+      predictions: [],
       observations: [],
       issues: [],
+      highlights: {
+        immediateAttention: [],
+        painPoints: [],
+        keyFindings: [],
+      },
       ai: {
         enabled: false,
         used: false,
@@ -905,206 +1498,31 @@ app.get('/api/observability/summary', async (_req, res) => {
         summary: null,
         error: 'Observability endpoint failed before AI analysis.',
       },
-    });
+    };
+
+    res.status(500).json(sanitizeCustomerFacingPayload(errorPayload));
   }
 });
 
 // Capture agent heartbeat ingestion (API-first; no DB creds on agent)
-app.post('/api/agents/heartbeat', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const agentId = String(body.agentId || body.id || '').trim();
-    if (!agentId) return res.status(400).json({ error: 'agentId is required' });
-    const serialNumberRaw = String(body.serialNumber || body.serial_number || '').trim();
-    const serialNumber = serialNumberRaw || null;
-
-    let canonicalAgentId = agentId;
-    if (serialNumber) {
-      const [existing]: any = await pool.query(
-        `SELECT id FROM agents WHERE serial_number = ? LIMIT 1`,
-        [serialNumber]
-      );
-      if (existing?.length) canonicalAgentId = String(existing[0].id || agentId);
-    }
-
-    const hostname = String(body.hostname || canonicalAgentId).trim();
-    const osName = String(body.os || body.platform || 'unknown').trim();
-    const osVersion = String(body.osVersion || body.version || 'unknown').trim();
-    const agentVersion = String(body.agentVersion || 'v1.0.0').trim();
-    const status = String(body.status || 'Actively Syncing').trim();
-
-    await pool.query(
-      `INSERT INTO agents (id, hostname, os, os_version, agent_version, status, serial_number, started_at, last_heartbeat_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE
-         hostname = VALUES(hostname),
-         os = VALUES(os),
-         os_version = VALUES(os_version),
-         agent_version = VALUES(agent_version),
-         status = VALUES(status),
-         serial_number = COALESCE(VALUES(serial_number), serial_number),
-         last_heartbeat_at = NOW()`,
-      [canonicalAgentId, hostname, osName, osVersion, agentVersion, status, serialNumber]
-    );
-
-    res.json({ success: true, agentId: canonicalAgentId, serialNumber });
-  } catch (err: any) {
-    if (err?.code === 'ER_NO_SUCH_TABLE') {
-      return res.status(404).json({ error: 'agents table not found' });
-    }
-    res.status(500).json({ error: err.message || 'Failed to ingest heartbeat' });
-  }
+app.post('/api/agents/heartbeat', async (_req, res) => {
+  res.status(410).json({
+    error: 'Legacy PulseIQ agent heartbeat endpoint is disabled. Use bsa-backed ingest path.',
+  });
 });
 
 // Capture agent metrics ingestion (API-first; no DB creds on agent)
-app.post('/api/agents/metrics', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const agentId = String(body.agentId || '').trim();
-    if (!agentId) return res.status(400).json({ error: 'agentId is required' });
-
-    const serialNumberRaw = String(body.serialNumber || body.serial_number || body?.payload?.serialNumber || '').trim();
-    const serialNumber = serialNumberRaw || null;
-
-    let canonicalAgentId = agentId;
-    if (serialNumber) {
-      const [existing]: any = await pool.query(
-        `SELECT id FROM agents WHERE serial_number = ? LIMIT 1`,
-        [serialNumber]
-      );
-      if (existing?.length) canonicalAgentId = String(existing[0].id || agentId);
-    }
-
-    const payload = body.payload && typeof body.payload === 'object' ? body.payload : body;
-    const host = String(body.hostname || payload?.hostname || canonicalAgentId).trim();
-    const platformName = String(body.platform || payload?.os?.platform || 'unknown').trim();
-    const distro = String(body.distro || payload?.os?.distro || platformName).trim();
-    const osVersion = String(body.osVersion || payload?.os?.version || 'unknown').trim();
-    const machineTypeRaw = String(body.machineType || payload?.machineType || payload?.system?.virtualization?.kind || '').trim().toLowerCase();
-    const machineType = machineTypeRaw === 'vm' || machineTypeRaw === 'virtual' ? 'VM' : machineTypeRaw ? 'Physical' : null;
-    const timestampValue = body.timestamp || payload?.timestamp;
-    const collectedAt = timestampValue ? new Date(timestampValue) : new Date();
-
-    await pool.query(
-      `INSERT INTO agent_metrics (agent_id, serial_number, machine_type, hostname, platform, distro, os_version, payload_json, collected_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [canonicalAgentId, serialNumber, machineType, host, platformName, distro, osVersion, JSON.stringify(payload), collectedAt]
-    );
-
-    await pool.query(
-      `INSERT INTO agents (id, hostname, os, os_version, agent_version, status, serial_number, started_at, last_heartbeat_at)
-       VALUES (?, ?, ?, ?, ?, 'Actively Syncing', ?, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE
-         hostname = VALUES(hostname),
-         os = VALUES(os),
-         os_version = VALUES(os_version),
-         serial_number = COALESCE(VALUES(serial_number), serial_number),
-         status = 'Actively Syncing',
-         last_heartbeat_at = NOW()`,
-      [canonicalAgentId, host, distro, osVersion, String(body.agentVersion || 'v2.0.0-go'), serialNumber]
-    );
-
-    res.json({ success: true, agentId: canonicalAgentId, serialNumber });
-  } catch (err: any) {
-    if (err?.code === 'ER_NO_SUCH_TABLE') {
-      return res.status(404).json({ error: 'agent_metrics table not found' });
-    }
-    res.status(500).json({ error: err.message || 'Failed to ingest metrics' });
-  }
+app.post('/api/agents/metrics', async (_req, res) => {
+  res.status(410).json({
+    error: 'Legacy PulseIQ agent metrics endpoint is disabled. Use bsa-backed ingest path.',
+  });
 });
 
 // Capture agent health ingestion (API-first; no DB creds on agent)
-app.post('/api/agents/health', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const agentId = String(body.agentId || '').trim();
-    if (!agentId) return res.status(400).json({ error: 'agentId is required' });
-
-    const serialNumberRaw = String(body.serialNumber || body.serial_number || '').trim();
-    const serialNumber = serialNumberRaw || null;
-
-    let canonicalAgentId = agentId;
-    if (serialNumber) {
-      const [existing]: any = await pool.query(
-        `SELECT id FROM agents WHERE serial_number = ? LIMIT 1`,
-        [serialNumber]
-      );
-      if (existing?.length) canonicalAgentId = String(existing[0].id || agentId);
-    }
-
-    const report = body.report && typeof body.report === 'object' ? body.report : null;
-    if (!report) return res.status(400).json({ error: 'report is required' });
-
-    const hostname = String(body.hostname || report?.hostname || canonicalAgentId).trim();
-    const osName = String(body.osName || report?.os?.name || 'unknown').trim();
-    const osVersion = String(body.osVersion || report?.os?.version || 'unknown').trim();
-    const checkedAt = body.timestamp || report?.startedAt ? new Date(body.timestamp || report?.startedAt) : new Date();
-
-    const numberOrNull = (v: any): number | null => {
-      if (v == null || v === '') return null;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    const summary = report?.summary && typeof report.summary === 'object' ? report.summary : {};
-    const checks = report?.checks && typeof report.checks === 'object' ? report.checks : {};
-    const network = checks?.network && typeof checks.network === 'object' ? checks.network : {};
-    const jobsAndServices = checks?.jobsAndServices && typeof checks.jobsAndServices === 'object' ? checks.jobsAndServices : {};
-
-    const failedServicesCount = Array.isArray(jobsAndServices?.failedServices)
-      ? jobsAndServices.failedServices.length
-      : Number(jobsAndServices?.failedServices || jobsAndServices?.failedServicesCount || 0);
-    const hungProcessCount = Array.isArray(jobsAndServices?.hungProcesses)
-      ? jobsAndServices.hungProcesses.length
-      : Number(jobsAndServices?.hungProcesses || jobsAndServices?.hungProcessCount || 0);
-
-    await pool.query(
-      `INSERT INTO health_checks (
-         agent_id, hostname, os_name, os_version, server_healthy,
-         cpu_usage_pct, memory_usage_pct, cpu_temperature_c,
-         network_latency_ms, network_download_mbps, network_rx_mbps, network_tx_mbps,
-         failed_services_count, hung_process_count, payload_json, checked_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        canonicalAgentId,
-        hostname,
-        osName,
-        osVersion,
-        summary?.serverHealthy ? 1 : 0,
-        numberOrNull(checks?.cpu?.usagePct),
-        numberOrNull(checks?.memory?.usagePct),
-        numberOrNull(checks?.temperature?.celsius),
-        numberOrNull(network?.avgLatencyMs),
-        numberOrNull(network?.downloadMbps),
-        numberOrNull(network?.rxMbps),
-        numberOrNull(network?.txMbps),
-        Number.isFinite(failedServicesCount) ? failedServicesCount : 0,
-        Number.isFinite(hungProcessCount) ? hungProcessCount : 0,
-        JSON.stringify(report),
-        checkedAt,
-      ]
-    );
-
-    await pool.query(
-      `INSERT INTO agents (id, hostname, os, os_version, agent_version, status, serial_number, started_at, last_heartbeat_at)
-       VALUES (?, ?, ?, ?, ?, 'Actively Syncing', ?, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE
-         hostname = VALUES(hostname),
-         os = VALUES(os),
-         os_version = VALUES(os_version),
-         serial_number = COALESCE(VALUES(serial_number), serial_number),
-         status = 'Actively Syncing',
-         last_heartbeat_at = NOW()`,
-      [canonicalAgentId, hostname, osName, osVersion, String(body.agentVersion || 'v2.0.0-go'), serialNumber]
-    );
-
-    res.json({ success: true, agentId: canonicalAgentId, serialNumber });
-  } catch (err: any) {
-    if (err?.code === 'ER_NO_SUCH_TABLE') {
-      return res.status(404).json({ error: 'health_checks table not found' });
-    }
-    res.status(500).json({ error: err.message || 'Failed to ingest health' });
-  }
+app.post('/api/agents/health', async (_req, res) => {
+  res.status(410).json({
+    error: 'Legacy PulseIQ agent health endpoint is disabled. Use bsa-backed ingest path.',
+  });
 });
 
 // Database monitor ingestion (API-first; no DB creds on agent)

@@ -56,7 +56,6 @@ const PAGE_META: Record<string, { title: string; description?: string }> = {
   'infra-vms':      { title: 'Infrastructure • VMs', description: 'Virtual machine inventory and health.' },
   'infra-storage':  { title: 'Infrastructure • Storage', description: 'Storage systems and capacity views.' },
   'infra-san':      { title: 'Infrastructure • SAN', description: 'SAN devices and Brocade fabric visibility.' },
-  'infra-computer': { title: 'Infrastructure • Computer', description: 'Endpoint computers grouped by vendor.' },
   'infra-detail':   { title: 'Infrastructure Details', description: 'Detailed host metrics including compute, memory, disk, inode, and network telemetry.' },
   database:         { title: 'Databases',            description: 'Monitored database fleet with health, space, and performance snapshots.' },
   snmp:             { title: 'SNMP Devices',         description: 'Manage SNMP devices and view telemetry/traps grouped by Storage and SAN.' },
@@ -100,7 +99,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
     vms: 0,
     storage: 0,
     san: 0,
-    computer: 0,
+
   });
 
   const handleDark = () => {
@@ -148,7 +147,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   }, [onRefresh]);
 
   useEffect(() => {
-    const infraActive = ['infra', 'infra-detail', 'infra-servers', 'infra-vms', 'infra-storage', 'infra-san', 'infra-computer', 'database', 'database-detail'].includes(currentRoute);
+    const infraActive = ['infra', 'infra-detail', 'infra-servers', 'infra-vms', 'infra-storage', 'infra-san', 'database', 'database-detail'].includes(currentRoute);
     const inventoryActive = ['inventory', 'inventory-snmp', 'inventory-agent', 'inventory-uptime'].includes(currentRoute);
 
     setExpandedSections((prev) => ({
@@ -171,9 +170,9 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   useEffect(() => {
     let ignore = false;
 
-    const inferCategory = (asset: any): 'servers' | 'vms' | 'storage' | 'san' | 'computer' | 'uptime' => {
+    const inferCategory = (asset: any): 'servers' | 'vms' | 'storage' | 'san'  | 'uptime' => {
       const explicit = String(asset?.device_category || '').trim().toLowerCase();
-      if (['servers', 'vms', 'storage', 'san', 'computer', 'uptime'].includes(explicit)) return explicit as any;
+      if (['servers', 'vms', 'storage', 'san', 'uptime'].includes(explicit)) return explicit as any;
 
       const parent = String(asset?.parent_type || '').toLowerCase();
       const sub = String(asset?.sub_type || '').toLowerCase();
@@ -181,7 +180,6 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
 
       if (parent === 'storage') return 'storage';
       if (parent === 'switch' || sub.includes('brocade') || sub.includes('connextrix')) return 'san';
-      if (parent === 'computer' || sub.includes('apple') || sub.includes('dell') || sub.includes('acer') || sub.includes('hp')) return 'computer';
       if (parent === 'website' || parent === 'api endpoint' || parent === 'network port' || parent === 'docker host' || parent === 'docker container') return 'uptime';
       if (parent === 'server' && (sub.includes('vm') || sub.includes('vmware') || name.includes('vm-') || name.startsWith('vm '))) return 'vms';
       return 'servers';
@@ -208,7 +206,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
         if (ignore) return;
 
         const assets = Array.isArray(assetsData) ? assetsData : [];
-        const base = { servers: 0, vms: 0, storage: 0, san: 0, computer: 0, uptime: 0 };
+        const base = { servers: 0, vms: 0, storage: 0, san: 0, uptime: 0 };
         for (const a of assets) base[inferCategory(a)] += 1;
 
         setCounts({
@@ -219,7 +217,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
           vms: Number(infraVmsData?.total || 0),
           storage: base.storage,
           san: base.san,
-          computer: base.computer,
+          
         });
       } catch {
         if (!ignore) {
@@ -258,7 +256,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
         { name: 'VMs', route: 'infra-vms', icon: Server, disabled: counts.vms === 0 },
         { name: 'Storage', route: 'infra-storage', icon: Database, disabled: counts.storage === 0 },
         { name: 'SAN', route: 'infra-san', icon: Router, disabled: counts.san === 0 },
-        { name: 'Computer', route: 'infra-computer', icon: Globe, disabled: counts.computer === 0 },
+        
         { name: 'Database', route: 'database', icon: Database },
       ],
     },
@@ -270,7 +268,6 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
     { name: 'Observability',     route: 'observability',     icon: Activity },
     { name: 'RackSpace',         route: 'rackpoint',         icon: Network },
     { name: 'Data Centers',      route: 'data-centers',      icon: Database },
-
     { name: 'Broadcast', route: 'broadcast', icon: Radio },
   ];
 
@@ -293,7 +290,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   ];
 
   const isRouteActive = (route: string) => {
-    if (route === 'infra-parent') return currentRoute === 'infra' || currentRoute === 'infra-detail' || currentRoute === 'infra-servers' || currentRoute === 'infra-vms' || currentRoute === 'infra-storage' || currentRoute === 'infra-san' || currentRoute === 'infra-computer' || currentRoute === 'database' || currentRoute === 'database-detail';
+    if (route === 'infra-parent') return currentRoute === 'infra' || currentRoute === 'infra-detail' || currentRoute === 'infra-servers' || currentRoute === 'infra-vms' || currentRoute === 'infra-storage' || currentRoute === 'infra-san' || currentRoute === 'database' || currentRoute === 'database-detail';
     if (route === 'infra-servers') return currentRoute === 'infra' || currentRoute === 'infra-detail' || currentRoute === 'infra-servers';
     if (route === 'database') return currentRoute === 'database' || currentRoute === 'database-detail';
     if (route === 'inventory-parent') return currentRoute === 'inventory' || currentRoute === 'inventory-snmp' || currentRoute === 'inventory-agent' || currentRoute === 'inventory-uptime';

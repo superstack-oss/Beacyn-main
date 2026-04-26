@@ -1,4 +1,4 @@
-import type { ObservabilityIssue, ObservabilityTableStat } from '../self/analyze';
+import type { ObservabilityIssue } from '../self/analyze';
 
 type AIProvider = 'openai' | 'gemini';
 
@@ -10,8 +10,65 @@ export interface ObservabilityAIInsightResult {
   error: string | null;
 }
 
+const BLOCKED_KEYS = new Set([
+  'ip',
+  'ipAddress',
+  'serverIp',
+  'password',
+  'secret',
+  'token',
+  'apiKey',
+  'api_key',
+  'authKey',
+  'auth_key',
+  'privKey',
+  'priv_key',
+  'username',
+  'email',
+  'deviceId',
+  'device_id',
+  'serial',
+  'serialNumber',
+  'serial_number',
+  'id',
+]);
+
+const REDACT_PATTERNS: RegExp[] = [
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+  /\b[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\b/gi,
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+  /\b(?:password|secret|token|apikey|api[_-]?key|auth[_-]?key|priv[_-]?key|username|email|serial|device[_-]?id|id)\s*[:=]\s*[^\s,;]+/gi,
+  /\b(?:asset|agent|device|server|user)[-_:\s]*[A-Za-z0-9-]{4,}\b/gi,
+];
+
+function redactString(value: string) {
+  let text = String(value || '');
+  for (const pattern of REDACT_PATTERNS) {
+    text = text.replace(pattern, '[redacted]');
+  }
+  return text;
+}
+
+function sanitizeForAI<T>(input: T): T {
+  if (input == null) return input;
+  if (typeof input === 'string') return redactString(input) as unknown as T;
+  if (Array.isArray(input)) return input.map((item) => sanitizeForAI(item)) as unknown as T;
+  if (typeof input === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+      if (BLOCKED_KEYS.has(key)) {
+        out[key] = '[redacted]';
+      } else {
+        out[key] = sanitizeForAI(value);
+      }
+    }
+    return out as T;
+  }
+  return input;
+}
+
 function compactIssue(issue: ObservabilityIssue) {
-  return {
+  return sanitizeForAI({
     severity: issue.severity,
     source: issue.source,
     title: issue.title,
@@ -19,35 +76,30 @@ function compactIssue(issue: ObservabilityIssue) {
     metric: issue.metric,
     value: issue.value,
     threshold: issue.threshold,
-  };
-}
-
-function compactTable(table: ObservabilityTableStat) {
-  return {
-    name: table.name,
-    available: table.available,
-    count1h: table.count1h,
-    lastSeenAt: table.lastSeenAt,
-  };
+  });
 }
 
 type InsightParams = {
   generatedAt: string;
-  tables: ObservabilityTableStat[];
+  context: Record<string, unknown>;
   observations: string[];
   issues: ObservabilityIssue[];
 };
 
 function buildPrompt(params: InsightParams) {
+  const safeContext = sanitizeForAI(params.context);
+  const safeObservations = sanitizeForAI(params.observations);
+  const safeIssues = params.issues.map(compactIssue);
+
   return {
     role: 'system',
-    instruction: 'You are an SRE observability assistant. Provide concise operational insights with priorities and actions.',
+    instruction: 'You are an SRE observability assistant. Provide concise operational insights with priorities and actions. Never infer or request private identifiers.',
     outputFormat: 'Return plain text with: 1) Top risks (max 3), 2) probable causes, 3) next actions (max 5).',
     context: {
       generatedAt: params.generatedAt,
-      tables: params.tables.map(compactTable),
-      observations: params.observations,
-      issues: params.issues.map(compactIssue),
+      operationalContext: safeContext,
+      observations: safeObservations,
+      issues: safeIssues,
     },
   };
 }
