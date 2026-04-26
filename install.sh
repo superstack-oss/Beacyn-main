@@ -620,6 +620,13 @@ else
   log_ok "Source cloned successfully."
 fi
 
+if [[ ! -f "$INSTALL_DIR/src/scripts/start.ts" ]]; then
+  log_error "The fetched repository is not compatible with this installer."
+  log_info "Missing required file: src/scripts/start.ts"
+  log_info "Verify BEACYN_REPO_URL points to the Beacyn platform repository and branch."
+  exit 1
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 7 — Install Node.js Dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -637,6 +644,11 @@ else
 fi
 
 log_ok "Dependencies installed."
+
+# Build frontend assets for NODE_ENV=production (`vite preview` expects dist/)
+log_step "Building Frontend Assets"
+npm run build 2>&1 | tail -20 | sed "s/^/  ${GRY}·${RST}  /"
+log_ok "Frontend build completed."
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 8 — Write .env
@@ -719,18 +731,29 @@ SERVICE_NAME="beacyn"
 NPM_BIN="$(which npm)"
 NODE_BIN="$(which node)"
 TSX_BIN="$INSTALL_DIR/node_modules/.bin/tsx"
+SERVICE_MANAGER="unknown"
+SERVICE_LOG_PATH=""
+SERVICE_ERR_LOG_PATH=""
+PLIST_LABEL=""
+PLIST_FILE=""
 
 # ─── macOS — launchd ──────────────────────────────────────────────────────────
 if [[ "$OS_NAME" == "macos" ]]; then
+  LAUNCHD_LOG_DIR="/var/log/beacyn"
   if [[ $EUID -eq 0 ]]; then
     PLIST_DIR="/Library/LaunchDaemons"
     PLIST_LABEL="io.beacyn.platform"
   else
     PLIST_DIR="$HOME/Library/LaunchAgents"
     PLIST_LABEL="io.beacyn.platform.${USER}"
+    LAUNCHD_LOG_DIR="$HOME/.beacyn/logs"
   fi
   mkdir -p "$PLIST_DIR"
+  mkdir -p "$LAUNCHD_LOG_DIR"
   PLIST_FILE="${PLIST_DIR}/${PLIST_LABEL}.plist"
+  SERVICE_MANAGER="launchd"
+  SERVICE_LOG_PATH="${LAUNCHD_LOG_DIR}/beacyn.log"
+  SERVICE_ERR_LOG_PATH="${LAUNCHD_LOG_DIR}/beacyn-error.log"
 
   cat > "$PLIST_FILE" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -762,13 +785,11 @@ if [[ "$OS_NAME" == "macos" ]]; then
   </dict>
   <key>RunAtLoad</key>         <true/>
   <key>KeepAlive</key>         <true/>
-  <key>StandardOutPath</key>   <string>/var/log/beacyn/beacyn.log</string>
-  <key>StandardErrorPath</key> <string>/var/log/beacyn/beacyn-error.log</string>
+  <key>StandardOutPath</key>   <string>${LAUNCHD_LOG_DIR}/beacyn.log</string>
+  <key>StandardErrorPath</key> <string>${LAUNCHD_LOG_DIR}/beacyn-error.log</string>
 </dict>
 </plist>
 PLIST
-
-  mkdir -p /var/log/beacyn 2>/dev/null || mkdir -p "$HOME/.beacyn/logs"
 
   # Unload existing if present, then load
   launchctl unload "$PLIST_FILE" 2>/dev/null || true
@@ -779,6 +800,9 @@ PLIST
 elif [[ -d /run/systemd/system ]] || has_cmd systemctl; then
   UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
   BEACYN_USER="$(whoami)"
+  SERVICE_MANAGER="systemd"
+  SERVICE_LOG_PATH="/var/log/beacyn/beacyn.log"
+  SERVICE_ERR_LOG_PATH="/var/log/beacyn/beacyn-error.log"
 
   sudo mkdir -p /var/log/beacyn
 
@@ -820,12 +844,15 @@ UNIT
 else
   log_warn "Neither launchd nor systemd detected. Starting Beacyn with nohup…"
   LOGDIR="$INSTALL_DIR/logs"
+  SERVICE_MANAGER="nohup"
+  SERVICE_LOG_PATH="$LOGDIR/beacyn.log"
+  SERVICE_ERR_LOG_PATH="$LOGDIR/beacyn-error.log"
   mkdir -p "$LOGDIR"
   (
     cd "$INSTALL_DIR"
     # shellcheck source=/dev/null
     set -a; source "$ENV_FILE"; set +a
-    nohup npm run start > "$LOGDIR/beacyn.log" 2>&1 &
+    nohup npm run start > "$SERVICE_LOG_PATH" 2> "$SERVICE_ERR_LOG_PATH" &
     echo $! > "$INSTALL_DIR/.beacyn.pid"
   )
   log_ok "Beacyn started in background (PID: $(cat "$INSTALL_DIR/.beacyn.pid" 2>/dev/null || echo 'unknown'))"
@@ -836,6 +863,33 @@ fi
 EULA_STAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ') via install.sh"
 printf '%s\nVersion: %s\n' "$EULA_STAMP" "$BEACYN_VERSION" > "$INSTALL_DIR/.eula-accepted"
 chmod 644 "$INSTALL_DIR/.eula-accepted"
+
+# ─── Install Beacyn management CLI ───────────────────────────────────────────
+log_step "Installing Beacyn Management CLI"
+
+BEACYN_CTL_CMD_FILE="$INSTALL_DIR/.beacynctl-command"
+bash "$INSTALL_DIR/src/scripts/install-beacynctl.sh" \
+  --app-dir "$INSTALL_DIR" \
+  --env-file "$ENV_FILE" \
+  --service-manager "$SERVICE_MANAGER" \
+  --service-name "$SERVICE_NAME" \
+  --plist-label "$PLIST_LABEL" \
+  --plist-file "$PLIST_FILE" \
+  --log-file "$SERVICE_LOG_PATH" \
+  --error-log-file "$SERVICE_ERR_LOG_PATH" \
+  --frontend-url "$FRONTEND_URL" \
+  --backend-url "$BACKEND_URL" \
+  --frontend-port "$CFG_FRONTEND_PORT" \
+  --backend-port "$CFG_BACKEND_PORT" \
+  --npm-bin "$NPM_BIN"
+
+if [[ -f "$BEACYN_CTL_CMD_FILE" ]]; then
+  BEACYN_CTL_CMD="$(cat "$BEACYN_CTL_CMD_FILE")"
+else
+  BEACYN_CTL_CMD="$INSTALL_DIR/bin/beacynctl"
+fi
+
+log_ok "Beacyn management CLI installed: ${BEACYN_CTL_CMD}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 11 — Final Summary
@@ -863,7 +917,7 @@ box_empty
 if [[ "$SERVICE_INSTALLED" == "true" ]]; then
   if [[ "$OS_NAME" == "macos" ]]; then
     box_row "${DIM}Service starts automatically on login via launchd.${RST}"
-    box_row "${GRY}Logs     ${RST}${DIM}/var/log/beacyn/beacyn.log${RST}"
+    box_row "${GRY}Logs     ${RST}${DIM}${LAUNCHD_LOG_DIR:-$HOME/.beacyn/logs}/beacyn.log${RST}"
   elif has_cmd systemctl; then
     box_row "${DIM}Service starts automatically on boot via systemd.${RST}"
     box_row "${GRY}Status   ${RST}${DIM}sudo systemctl status beacyn${RST}"
@@ -876,6 +930,14 @@ else
   box_row "${YEL}⚠  Service could not be registered automatically.${RST}"
   box_row "${DIM}Run manually: cd \$INSTALL_DIR && npm run start${RST}"
 fi
+box_empty
+box_div
+box_empty
+box_row "${GRY}Status         ${RST}${DIM}${BEACYN_CTL_CMD} status${RST}"
+box_row "${GRY}Start          ${RST}${DIM}${BEACYN_CTL_CMD} start${RST}"
+box_row "${GRY}Restart        ${RST}${DIM}${BEACYN_CTL_CMD} restart${RST}"
+box_row "${GRY}Stop           ${RST}${DIM}${BEACYN_CTL_CMD} stop${RST}"
+box_row "${GRY}Logs           ${RST}${DIM}${BEACYN_CTL_CMD} logs -f${RST}"
 box_empty
 box_div
 box_empty
