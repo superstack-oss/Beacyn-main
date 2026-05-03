@@ -2,10 +2,10 @@ import mysql from 'mysql2/promise';
 
 import 'dotenv/config';
 
-const host = process.env.DB_HOST || 'localhost';
-const user = process.env.DB_USER || 'root';
-const password = process.env.DB_PASSWORD || 'madhumitaN8#';
-const databaseName = process.env.DB_NAME || 'pulseiq';
+const host = process.env.DB_HOST;
+const user = process.env.DB_USER;
+const password = process.env.DB_PASSWORD;
+const databaseName = process.env.DB_NAME!;
 const port = Number(process.env.DB_PORT || 3306);
 const useSsl = (process.env.DB_SSL || '').toLowerCase() === 'true';
 const rejectUnauthorized = (process.env.DB_SSL_REJECT_UNAUTHORIZED || '').toLowerCase() === 'true';

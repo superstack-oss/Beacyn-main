@@ -60,6 +60,7 @@ const PAGE_META: Record<string, { title: string; description?: string }> = {
   database:         { title: 'Databases',            description: 'Monitored database fleet with health, space, and performance snapshots.' },
   snmp:             { title: 'SNMP Devices',         description: 'Manage SNMP devices and view telemetry/traps grouped by Storage and SAN.' },
   'database-detail':{ title: 'Database Details',     description: 'Detailed database node, inventory, storage, and performance trends.' },
+  'database-query-insights': { title: 'Query Insights', description: 'Top query diagnostics, comparison charts, and digest-level execution trends.' },
   incidents:        { title: 'Incidents',            description: 'Configure alert rules and ServiceNow integrations.' },
   agents:           { title: 'Capture Agents',       description: 'Manage deployed agents collecting infrastructure telemetry.' },
   settings:         { title: 'Settings',             description: 'Configure your Beacyn workspace and preferences.' },

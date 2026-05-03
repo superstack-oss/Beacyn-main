@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { User as UserIcon, KeyRound, Users, MessageSquareText } from 'lucide-react';
+import { User as UserIcon, KeyRound, Users, MessageSquareText, ArrowLeft, ChartColumn } from 'lucide-react';
 import LoginPage from './pages/auth/LoginPage';
 import PrivacyPolicyPage from './pages/policy/PrivacyPolicyPage';
 import TermsOfServicePage from './pages/policy/TermsOfServicePage';
@@ -10,6 +10,7 @@ import InfraDetail from './pages/main/infrastructure/InfraDetail';
 import InfrastructurePage from './pages/main/infrastructure/InfrastructurePage';
 import DatabasePage from './pages/main/database/DatabasePage';
 import DatabaseDetails from './pages/main/database/DatabaseDetails';
+import DatabaseQueryInsightsPage from './pages/main/database/DatabaseQueryInsightsPage';
 import WebMonitors from './pages/main/uptime/WebMonitors';
 import AgentsPage from './pages/main/infrastructure/AgentsPage';
 import InventoryPage from './pages/main/InventoryPage';
@@ -34,9 +35,26 @@ import { clearStoredUser, getStoredUser, authHeaders } from './lib/auth';
 import { apiUrl } from './lib/api';
 
 function App() {
+  const readDatabaseTargetFromHash = () => {
+    if (typeof window === 'undefined') return null;
+    const hashRoute = window.location.hash.replace(/^#/, '').trim();
+    const prefixes = ['database-detail/', 'database-query-insights/'];
+    const prefix = prefixes.find((p) => hashRoute.startsWith(p));
+    if (!prefix) return null;
+    const raw = hashRoute.slice(prefix.length).trim();
+    if (!raw) return null;
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  };
+
   const [route, setRoute] = useState(() => {
     const storedUser = getStoredUser();
     const hashRoute = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '').trim() : '';
+    if (hashRoute.startsWith('database-detail/')) return storedUser ? 'database-detail' : 'login';
+    if (hashRoute.startsWith('database-query-insights/')) return storedUser ? 'database-query-insights' : 'login';
     if (hashRoute.startsWith('broadcast/public/')) return hashRoute;
     if (['privacy', 'terms', 'disclaimer', 'eula'].includes(hashRoute)) return hashRoute;
     return storedUser ? (hashRoute || 'overview') : 'login';
@@ -44,7 +62,13 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [userDetailsTab, setUserDetailsTab] = useState('profile');
   const [selectedInfraAgentId, setSelectedInfraAgentId] = useState<string | null>(null);
-  const [selectedDatabaseTargetKey, setSelectedDatabaseTargetKey] = useState<string | null>(null);
+  const [selectedDatabaseTargetKey, setSelectedDatabaseTargetKey] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const fromHash = readDatabaseTargetFromHash();
+    if (fromHash) return fromHash;
+    const saved = window.sessionStorage.getItem('selectedDatabaseTargetKey');
+    return saved && saved.trim() ? saved.trim() : null;
+  });
   const [selectedDcId, setSelectedDcId] = useState<string | null>(null);
   const [selectedAuditId, setSelectedAuditId] = useState<number | null>(null);
 
@@ -69,6 +93,14 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if ((route === 'database-detail' || route === 'database-query-insights') && selectedDatabaseTargetKey) {
+      const routePrefix = route === 'database-query-insights' ? 'database-query-insights' : 'database-detail';
+      const nextHash = `#${routePrefix}/${encodeURIComponent(selectedDatabaseTargetKey)}`;
+      if (window.location.hash !== nextHash) {
+        window.location.hash = nextHash;
+      }
+      return;
+    }
     if (route && route !== 'login') {
       if (window.location.hash !== `#${route}`) {
         window.location.hash = route;
@@ -76,12 +108,43 @@ function App() {
     } else if (route === 'login') {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     }
-  }, [route]);
+  }, [route, selectedDatabaseTargetKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (selectedDatabaseTargetKey && selectedDatabaseTargetKey.trim()) {
+      window.sessionStorage.setItem('selectedDatabaseTargetKey', selectedDatabaseTargetKey.trim());
+    }
+  }, [selectedDatabaseTargetKey]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onHashChange = () => {
       const hashRoute = window.location.hash.replace(/^#/, '').trim() || 'overview';
+      if (hashRoute.startsWith('database-detail/')) {
+        const raw = hashRoute.slice('database-detail/'.length).trim();
+        if (raw) {
+          try {
+            setSelectedDatabaseTargetKey(decodeURIComponent(raw));
+          } catch {
+            setSelectedDatabaseTargetKey(raw);
+          }
+        }
+        setRoute('database-detail');
+        return;
+      }
+      if (hashRoute.startsWith('database-query-insights/')) {
+        const raw = hashRoute.slice('database-query-insights/'.length).trim();
+        if (raw) {
+          try {
+            setSelectedDatabaseTargetKey(decodeURIComponent(raw));
+          } catch {
+            setSelectedDatabaseTargetKey(raw);
+          }
+        }
+        setRoute('database-query-insights');
+        return;
+      }
       if (hashRoute.startsWith('broadcast/public/')) { setRoute(hashRoute); return; }
       if (['privacy', 'terms', 'disclaimer', 'eula'].includes(hashRoute)) { setRoute(hashRoute); return; }
       
@@ -133,8 +196,8 @@ function App() {
 
   const renderCurrentRoute = () => {
     switch (route) {
-      case 'overview': return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
-      case 'inventory': return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
+      case 'overview': return <OverviewPage key={refreshKey} />;
+      case 'inventory': return <OverviewPage key={refreshKey} />;
       case 'infra':
       case 'infra-servers':
         return (
@@ -186,6 +249,14 @@ function App() {
       case 'database-detail':
         return (
           <DatabaseDetails
+            key={`${refreshKey}-${selectedDatabaseTargetKey ?? 'none'}`}
+            targetKey={selectedDatabaseTargetKey}
+            onBack={() => setRoute('database')}
+          />
+        );
+      case 'database-query-insights':
+        return (
+          <DatabaseQueryInsightsPage
             key={`${refreshKey}-${selectedDatabaseTargetKey ?? 'none'}`}
             targetKey={selectedDatabaseTargetKey}
             onBack={() => setRoute('database')}
@@ -270,7 +341,7 @@ function App() {
       case 'broadcast':
         return <BroadcastPage />;
 
-      default: return <OverviewPage key={refreshKey} onOpenObservability={() => setRoute('observability')} />;
+      default: return <OverviewPage key={refreshKey} />;
     }
   };
 
@@ -305,6 +376,28 @@ function App() {
     </>
   ) : null;
 
+  const databaseInsightsHeaderContent = (route === 'database-detail' || route === 'database-query-insights') ? (
+    <>
+      <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+      <button
+        type="button"
+        onClick={() => setRoute(route === 'database-query-insights' ? 'database-detail' : 'database-query-insights')}
+        className="h-8 inline-flex items-center gap-1.5 px-2.5 text-sm rounded-md transition-colors text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-50 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+      >
+        {route === 'database-query-insights' ? <ArrowLeft className="h-3.5 w-3.5" /> : <ChartColumn className="h-3.5 w-3.5" />}
+        <span>{route === 'database-query-insights' ? 'Back to Details' : 'Query Insights'}</span>
+      </button>
+      <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+    </>
+  ) : null;
+
+  const computedHeaderContent = (
+    <>
+      {userDetailsHeaderContent}
+      {databaseInsightsHeaderContent}
+    </>
+  );
+
   return (
     <MainLayout
       currentRoute={route}
@@ -315,7 +408,7 @@ function App() {
         setRoute('login'); 
       }}
       onRefresh={handleRefresh}
-      headerContent={userDetailsHeaderContent}
+      headerContent={computedHeaderContent}
     >
       {renderCurrentRoute()}
     </MainLayout>

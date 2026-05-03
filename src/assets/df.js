@@ -11,10 +11,10 @@ const RUNTIME = {
 };
 
 const DB = {
-  host: process.env.DB_MONITOR_DB_HOST || process.env.PULSE_DB_HOST || 'localhost',
-  user: process.env.DB_MONITOR_DB_USER || process.env.PULSE_DB_USER || 'root',
-  password: process.env.DB_MONITOR_DB_PASSWORD || process.env.PULSE_DB_PASSWORD || 'madhumitaN8#',
-  database: process.env.DB_MONITOR_DB_NAME || process.env.PULSE_DB_NAME || 'pulseiq',
+  host: process.env.DB_MONITOR_DB_HOST || process.env.PULSE_DB_HOST,
+  user: process.env.DB_MONITOR_DB_USER || process.env.PULSE_DB_USER,
+  password: process.env.DB_MONITOR_DB_PASSWORD || process.env.PULSE_DB_PASSWORD,
+  database: process.env.DB_MONITOR_DB_NAME || process.env.PULSE_DB_NAME,
   table: process.env.DB_MONITOR_DB_TABLE || 'database_monitor_logs',
   enabled: (process.env.DB_MONITOR_SAVE_TO_DB || 'true').toLowerCase() !== 'false',
 };
@@ -140,10 +140,10 @@ function autoTargetsFromInstalled(installed) {
     targets.push({
       type: 'mysql',
       name: 'mysql-auto',
-      host: process.env.MYSQL_HOST || '127.0.0.1',
+      host: process.env.MYSQL_HOST,
       port: Number(process.env.MYSQL_PORT || 3306),
       user: process.env.MYSQL_USER || 'root',
-      password: process.env.MYSQL_PASSWORD || 'madhumitaN8#',
+      password: process.env.MYSQL_PASSWORD,
       database: process.env.MYSQL_DATABASE,
       uri: process.env.MYSQL_URI,
       autoDetected: true,

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -161,6 +160,67 @@ async function parseJsonResponseSafe(res: Response) {
   } catch {
     return null;
   }
+}
+
+function escapeCsvCell(value: unknown) {
+  const str = String(value ?? '');
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function toCsv(rows: Array<Record<string, unknown>>) {
+  if (!rows.length) return '';
+  const headers = Object.keys(rows[0]);
+  const lines = [headers.join(',')];
+  for (const row of rows) {
+    lines.push(headers.map((h) => escapeCsvCell(row[h])).join(','));
+  }
+  return lines.join('\n');
+}
+
+function parseCsvLine(line: string) {
+  const out: string[] = [];
+  let curr = '';
+  let i = 0;
+  let inQuotes = false;
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        curr += '"';
+        i += 2;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      i += 1;
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      out.push(curr);
+      curr = '';
+      i += 1;
+      continue;
+    }
+    curr += ch;
+    i += 1;
+  }
+  out.push(curr);
+  return out;
+}
+
+function parseCsvText(text: string) {
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n').filter((line) => line.trim().length > 0);
+  if (!lines.length) return [] as Array<Record<string, string>>;
+  const headers = parseCsvLine(lines[0]).map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cols = parseCsvLine(line);
+    const row: Record<string, string> = {};
+    headers.forEach((header, idx) => {
+      row[header] = String(cols[idx] ?? '').trim();
+    });
+    return row;
+  });
 }
 
 function TextAction({ disabled, onClick, children }: { disabled?: boolean; onClick?: () => void; children: React.ReactNode }) {
@@ -901,19 +961,23 @@ export default function RackPointManager() {
         specs: '2× Xeon Gold · 256 GB RAM · 4× NVMe',
       },
     ];
-    const ws = XLSX.utils.json_to_sheet(sampleRows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'RackPointImport');
-    XLSX.writeFile(wb, 'rackpoint-bulk-template.xlsx');
+    const csv = toCsv(sampleRows);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rackpoint-bulk-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   const handleBulkUploadFile = async (file: File) => {
     setImporting(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const parsed = XLSX.utils.sheet_to_json<Record<string, any>>(firstSheet, { defval: '' });
+      const text = await file.text();
+      const parsed = parseCsvText(text);
       const rows = parsed.map((row) => ({
         ...row,
         dcId: String(row.dcId || selectedDc?.id || '').trim(),
@@ -926,12 +990,12 @@ export default function RackPointManager() {
         body: JSON.stringify({ rows }),
       });
       const data = await parseJsonResponseSafe(res);
-      if (!res.ok) throw new Error((data as any)?.error || 'Failed to import RackPoint workbook');
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to import RackPoint CSV');
       const warnings = Array.isArray((data as any)?.warnings) ? (data as any).warnings.length : 0;
       setToast(`Imported ${(data as any)?.createdDevices || 0} devices${warnings ? ` · ${warnings} warnings` : ''}`);
       await loadData();
     } catch (err: any) {
-      setLoadError(err?.message || 'Failed to import workbook');
+      setLoadError(err?.message || 'Failed to import CSV');
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -954,7 +1018,7 @@ export default function RackPointManager() {
               <TextAction disabled={!canManageSelectedDc || selectedDcRacks.length === 0} onClick={() => openDeviceForm()}>Add Device</TextAction>
               <TextAction disabled={!selectedDc} onClick={downloadTemplate}>Download Template</TextAction>
               <TextAction disabled={!canManageSelectedDc || importing} onClick={() => fileInputRef.current?.click()}>{importing ? 'Uploading...' : 'Bulk Upload'}</TextAction>
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void handleBulkUploadFile(file); }} />
+              <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void handleBulkUploadFile(file); }} />
             </>
           ) : null}
           <div className="relative">

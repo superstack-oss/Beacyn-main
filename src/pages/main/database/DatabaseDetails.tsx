@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { ArrowLeft, Database, HardDrive, ShieldCheck, Cpu, Clock3 } from 'lucide-react';
+import { ArrowLeft, Database, HardDrive, ShieldCheck, Cpu, Clock3, ChevronRight, TableIcon, X } from 'lucide-react';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { apiUrl } from '../../../lib/api';
 
 interface DatabaseDetailsProps {
@@ -76,6 +77,22 @@ interface DatabaseDetailResponse {
   queryCacheHitTrend: Array<{ time: string; value: number | null }>;
 }
 
+interface TableMeta {
+  tableName: string;
+  tableType: string;
+  engine: string | null;
+  tableRows: number | null;
+  avgRowLength: number | null;
+  dataLength: number | null;
+  indexLength: number | null;
+  createTime: string | null;
+  updateTime: string | null;
+  tableComment: string | null;
+  tableCollation: string | null;
+  rowFormat: string | null;
+  autoIncrement: number | null;
+}
+
 function statusClass(status: string) {
   if (status === 'Connected') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
   if (status === 'Unavailable') return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -115,9 +132,9 @@ function metricSupportState(
   detail: DatabaseDetailResponse,
   value: unknown,
   capabilityPath: string,
-  supportedEngines?: Array<'mysql' | 'postgres' | 'mongodb' | 'oracle'>
+  supportedEngines?: Array<'mysql' | 'postgres' | 'mongodb' | 'oracle' | 'sqlserver'>
 ) {
-  const engine = String(detail.latest.targetType || '').toLowerCase() as 'mysql' | 'postgres' | 'mongodb' | 'oracle';
+  const engine = String(detail.latest.targetType || '').toLowerCase() as 'mysql' | 'postgres' | 'mongodb' | 'oracle' | 'sqlserver';
   if (supportedEngines && !supportedEngines.includes(engine)) {
     return { label: 'Not supported on this engine', cls: 'bg-zinc-50 text-zinc-700 border-zinc-200' };
   }
@@ -169,6 +186,42 @@ function formatShortTime(value: string) {
 export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsProps) {
   const [detail, setDetail] = useState<DatabaseDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selectedDb, setSelectedDb] = useState<{ id: string; dbName: string } | null>(null);
+  const [tableMetas, setTableMetas] = useState<TableMeta[]>([]);
+  const [tableMetaLoading, setTableMetaLoading] = useState(false);
+  const [tableMetaError, setTableMetaError] = useState<string | null>(null);
+  const tableMetaAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!selectedDb) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedDb(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedDb]);
+
+  useEffect(() => {
+    if (!selectedDb || !detail?.targetKey) {
+      setTableMetas([]);
+      return;
+    }
+    tableMetaAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    tableMetaAbortRef.current = ctrl;
+    setTableMetaLoading(true);
+    setTableMetaError(null);
+    setTableMetas([]);
+    fetch(
+      apiUrl(`/api/databases/${encodeURIComponent(detail.targetKey)}/tables/${encodeURIComponent(selectedDb.dbName)}`),
+      { signal: ctrl.signal }
+    )
+      .then((r) => (r.ok ? r.json() : r.json().then((e: any) => Promise.reject(new Error(e?.error || 'Failed to load')))))
+      .then((data) => { setTableMetas(data?.tables || []); })
+      .catch((err) => { if (err.name !== 'AbortError') setTableMetaError(err?.message || 'Failed to load table metadata'); })
+      .finally(() => setTableMetaLoading(false));
+    return () => ctrl.abort();
+  }, [selectedDb, detail?.targetKey]);
 
   useEffect(() => {
     if (!targetKey) {
@@ -230,12 +283,15 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
   const replicationLagState = metricState((detail.node?.replicationLagSec as number | null | undefined) ?? detail.latest.replicationLagSec ?? null, 'latency');
   const latencySupport = metricSupportState(detail, detail.performance?.latencyMs, 'featureSupported.connectionHealthClassification');
   const sessionSupport = metricSupportState(detail, detail.performance?.activeSessions, 'featureSupported.connectionHealthClassification');
-  const slowSupport = metricSupportState(detail, detail.performance?.slowQueries, 'featureSupported.queryDiagnostics.mysql.slowQuerySampling', ['mysql']);
+  const slowSupport = metricSupportState(detail, detail.performance?.slowQueries, 'featureSupported.queryDiagnostics.mysql.slowQuerySampling', ['mysql', 'sqlserver']);
   const lockSupport = metricSupportState(detail, detail.performance?.locks, 'featureSupported.connectionHealthClassification');
   const inventorySizeTotal = detail.inventory?.databases?.reduce((sum, db) => sum + Number(db.sizeMb || 0), 0) || 0;
+  const noDataPlaceholder = 'No data available from the latest snapshots.';
+  const isNotSupported = (label: string) => label.toLowerCase().includes('not supported on this engine');
+  const engineType = String(detail.latest.targetType || '').toLowerCase();
   const chartNum = (value: unknown) => {
     const n = Number(value);
-    return Number.isFinite(n) ? n : 0;
+    return Number.isFinite(n) ? n : null;
   };
   const queryPerformanceTrendData = detail.qpsTrend.map((p, i) => ({
     time: p.time,
@@ -249,6 +305,68 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
     { name: 'Threads Conn', value: chartNum(detail.performance?.threadsConnected) },
     { name: 'Conn Err', value: chartNum(detail.performance?.connectionErrors) },
   ];
+  const connectionsThreadsSupport = metricSupportState(
+    detail,
+    detail.performance?.activeConnections ?? detail.performance?.threadsConnected,
+    'featureSupported.connectionHealthClassification'
+  );
+  const connectionsThreadsHasData = connectionsThreadsChartData.some((p) => p.value != null);
+
+  const slowQueryDiagCapabilityPath = engineType === 'mysql'
+    ? 'featureSupported.queryDiagnostics.mysql.topRunningQueries'
+    : engineType === 'postgres'
+      ? 'featureSupported.queryDiagnostics.postgres.longRunningQueries'
+      : engineType === 'mongodb'
+        ? 'featureSupported.queryDiagnostics.mongodb.currentOperations'
+        : engineType === 'oracle'
+          ? 'featureSupported.queryDiagnostics.oracle.topSessions'
+          : engineType === 'sqlserver'
+            ? 'featureSupported.queryDiagnostics.sqlserver.longRunningQueries'
+            : 'featureSupported.queryDiagnostics.mysql.topRunningQueries';
+  const slowQueryDiagSupport = metricSupportState(
+    detail,
+    detail.diagnostics?.query?.slowQuerySampling
+      ?? detail.diagnostics?.query?.longRunningQueries
+      ?? detail.diagnostics?.query?.currentOperations
+      ?? detail.diagnostics?.query?.topRunningQueries,
+    slowQueryDiagCapabilityPath,
+    ['mysql', 'postgres', 'mongodb', 'oracle', 'sqlserver']
+  );
+  const slowQueryDiagCount =
+    detail.diagnostics?.query?.slowQuerySampling?.length
+    ?? detail.diagnostics?.query?.longRunningQueries?.length
+    ?? detail.diagnostics?.query?.currentOperations?.length
+    ?? detail.diagnostics?.query?.topRunningQueries?.length
+    ?? 0;
+  const blockingCapabilityPath = engineType === 'sqlserver'
+    ? 'featureSupported.queryDiagnostics.sqlserver.blockingQueries'
+    : 'featureSupported.queryDiagnostics.postgres.blockingQueries';
+  const blockingQuerySupport = metricSupportState(
+    detail,
+    detail.diagnostics?.query?.blockingQueries,
+    blockingCapabilityPath,
+    ['postgres', 'sqlserver']
+  );
+  const blockingQueryCount = Array.isArray(detail.diagnostics?.query?.blockingQueries)
+    ? detail.diagnostics.query.blockingQueries.length
+    : 0;
+
+  const tableIndexCapabilityPath = engineType === 'sqlserver'
+    ? 'featureSupported.metrics.sqlserver.fullTableScans'
+    : 'featureSupported.metrics.mysql.fullTableScans';
+  const tableIndexSupport = metricSupportState(
+    detail,
+    detail.diagnostics?.table?.topTablesBySize ?? detail.diagnostics?.index?.fullTableScans ?? detail.performance?.fullTableScans,
+    tableIndexCapabilityPath,
+    ['mysql', 'sqlserver']
+  );
+  const tableIndexHasData = !!(
+    detail.diagnostics?.table?.topTablesBySize?.length
+    || detail.diagnostics?.table?.topGrowthTables?.length
+    || detail.diagnostics?.index?.fullTableScans != null
+    || detail.performance?.fullTableScans != null
+    || detail.diagnostics?.index?.noIndexUsedQueries != null
+  );
   const innodbStorageChartData = [
     { name: 'Reads/s', value: chartNum(detail.performance?.innodb?.readsPerSec) },
     { name: 'Writes/s', value: chartNum(detail.performance?.innodb?.writesPerSec) },
@@ -267,11 +385,16 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
   return (
     <div className="space-y-7 db-premium-page db-premium-details">
       <div className="flex items-center justify-between">
-        {onBack && (
-          <Button variant="outline" size="sm" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back to databases
-          </Button>
-        )}
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to databases
+          </button>
+        ) : null}
         <div className="flex items-center gap-2">
           <Badge variant="outline" className={`db-premium-badge ${statusClass(detail.latest.status)}`}>{detail.latest.status}</Badge>
           <Badge variant="outline" className={`db-premium-badge ${healthClass(detail.latest.healthCategory || detail.overview.overallHealth)}`}>{detail.latest.healthCategory || detail.overview.overallHealth || 'Unknown'}</Badge>
@@ -478,8 +601,16 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
                     {detail.inventory.databases.map((db, idx) => {
                       const pct = inventorySizeTotal > 0 ? Math.min(100, Math.max(0, (Number(db.sizeMb || 0) / inventorySizeTotal) * 100)) : 0;
                       return (
-                        <TableRow key={db.id} className={`border-b border-zinc-100 dark:border-zinc-800/60 group ${idx % 2 === 0 ? 'bg-zinc-50/20 dark:bg-zinc-900/15' : ''} hover:bg-zinc-50/60 dark:hover:bg-zinc-900/40 transition-colors`}>
-                          <TableCell className="pl-4 font-semibold text-zinc-800 dark:text-zinc-200 py-4">{db.dbName || db.id}</TableCell>
+                        <TableRow
+                          key={db.id}
+                          className={`border-b border-zinc-100 dark:border-zinc-800/60 group cursor-pointer ${idx % 2 === 0 ? 'bg-zinc-50/20 dark:bg-zinc-900/15' : ''} hover:bg-sky-50/60 dark:hover:bg-sky-900/20 transition-colors`}
+                          onClick={() => setSelectedDb({ id: db.id, dbName: db.dbName || db.id })}
+                          title={`Click to view tables in ${db.dbName || db.id}`}
+                        >
+                          <TableCell className="pl-4 py-4">
+                            <span className="font-semibold text-zinc-800 dark:text-zinc-200 group-hover:text-sky-700 dark:group-hover:text-sky-400 transition-colors">{db.dbName || db.id}</span>
+                            <ChevronRight className="inline-block w-3.5 h-3.5 ml-1.5 text-zinc-300 group-hover:text-sky-500 transition-colors" />
+                          </TableCell>
                           <TableCell className="text-right tabular-nums py-4">{db.tableCount}</TableCell>
                           <TableCell className="text-right tabular-nums py-4">{Number(db.sizeMb || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right tabular-nums py-4">{pct.toFixed(1)}%</TableCell>
@@ -512,6 +643,116 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
           )}
         </CardContent>
       </Card>
+
+      {/* Table Metadata Modal */}
+      {selectedDb ? (
+        <div
+          className="fixed inset-0 z-50 bg-zinc-900/45 backdrop-blur-[2px] flex items-center justify-center p-2 sm:p-5"
+          onClick={() => setSelectedDb(null)}
+        >
+          <div
+            className="w-[min(98vw,1400px)] h-[min(92vh,960px)] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 sm:px-5 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-semibold">
+                  <TableIcon className="w-4 h-4 text-sky-600" />
+                  Tables - <span className="font-mono text-sky-700 dark:text-sky-400">{selectedDb?.dbName}</span>
+                </h3>
+                <p className="text-sm text-zinc-500 mt-1">
+                  Schema-level metadata from <code className="text-xs bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded">information_schema.TABLES</code>.
+                  No row data is exposed.
+                </p>
+              </div>
+              <Button variant="outline" size="icon" className="shrink-0" onClick={() => setSelectedDb(null)} aria-label="Close table metadata popup">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="flex-1 overflow-auto px-3 sm:px-4 py-3">
+            {tableMetaLoading ? (
+              <div className="space-y-2 pt-2">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-9 w-full rounded-md" />
+                ))}
+              </div>
+            ) : tableMetaError ? (
+              <div className="py-10 text-center text-sm text-rose-600">{tableMetaError}</div>
+            ) : !tableMetas.length ? (
+              <div className="py-10 text-center text-sm text-zinc-500">No tables found in this database.</div>
+            ) : (
+              <>
+                <p className="text-xs text-zinc-500 mb-2">{tableMetas.length} table{tableMetas.length !== 1 ? 's' : ''} found</p>
+                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-auto max-h-[calc(92vh-150px)]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/95 dark:bg-zinc-900/80 sticky top-0 z-10">
+                        <TableHead className="pl-3 py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 whitespace-nowrap">Table</TableHead>
+                        <TableHead className="py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 whitespace-nowrap">Type</TableHead>
+                        <TableHead className="py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 whitespace-nowrap">Engine</TableHead>
+                        <TableHead className="py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 text-right whitespace-nowrap">~Rows</TableHead>
+                        <TableHead className="py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 text-right whitespace-nowrap">Data</TableHead>
+                        <TableHead className="py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 text-right whitespace-nowrap">Index</TableHead>
+                        <TableHead className="py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 whitespace-nowrap">Format</TableHead>
+                        <TableHead className="pr-3 py-2 font-semibold text-[10px] uppercase tracking-wider text-zinc-500 whitespace-nowrap">Updated</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tableMetas.map((t, idx) => {
+                        const dataMb = t.dataLength == null ? null : (t.dataLength / 1024 / 1024);
+                        const idxMb = t.indexLength == null ? null : (t.indexLength / 1024 / 1024);
+                        const isView = t.tableType === 'VIEW';
+                        return (
+                          <TableRow
+                            key={t.tableName}
+                            className={`border-b border-zinc-100 dark:border-zinc-800/60 ${idx % 2 === 0 ? 'bg-white dark:bg-zinc-950' : 'bg-zinc-50/30 dark:bg-zinc-900/20'}`}
+                          >
+                            <TableCell className="pl-3 py-2 font-mono text-[11px] font-medium text-zinc-800 dark:text-zinc-200 whitespace-nowrap">
+                              {t.tableName}
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${isView ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-zinc-50 text-zinc-600 border-zinc-200'}`}>
+                                {isView ? 'VIEW' : 'TABLE'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-2 text-[11px] text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{t.engine || '-'}</TableCell>
+                            <TableCell className="py-2 text-right tabular-nums text-[11px] whitespace-nowrap">
+                              {isView ? '-' : (t.tableRows == null ? '-' : t.tableRows.toLocaleString())}
+                              {t.tableRows != null && !isView && (
+                                <span className="block text-[10px] text-zinc-400">approx.</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2 text-right tabular-nums text-[11px] whitespace-nowrap">
+                              {dataMb == null ? '-' : dataMb < 0.01 ? '< 0.01 MB' : `${dataMb.toFixed(2)} MB`}
+                            </TableCell>
+                            <TableCell className="py-2 text-right tabular-nums text-[11px] whitespace-nowrap">
+                              {idxMb == null ? '-' : idxMb < 0.01 ? '< 0.01 MB' : `${idxMb.toFixed(2)} MB`}
+                            </TableCell>
+                            <TableCell className="py-2 text-[11px] text-zinc-500 whitespace-nowrap">{t.rowFormat || '-'}</TableCell>
+                            <TableCell className="pr-3 py-2 text-[11px] text-zinc-500 whitespace-nowrap">
+                              {t.updateTime
+                                ? new Date(t.updateTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                                : '-'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="mt-2 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 px-3 py-2">
+                  <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">Powered by Beacyn MinitorAgentᵀᴹ</p>
+                  <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-400">
+                    This view is an informational snapshot of table metadata. If you notice any discrepancies, please verify directly on the database side, as data timing and collection intervals may occasionally introduce conflicts.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          </div>
+        </div>
+      ) : null}
 
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader>
@@ -668,15 +909,21 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
             <CardDescription>Connection pressure and thread activity in one chart.</CardDescription>
           </CardHeader>
           <CardContent className="h-[260px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={connectionsThreadsChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3f3f46" opacity={0.2} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#71717a' }} />
-                <YAxis axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#71717a' }} width={38} />
-                <Tooltip formatter={(value) => `${value}`} contentStyle={{ borderRadius: 10, border: '1px solid #d4d4d8', boxShadow: '0 8px 28px rgba(15,23,42,0.08)' }} />
-                <Bar dataKey="value" fill="#16a34a" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {isNotSupported(connectionsThreadsSupport.label) ? (
+              <div className="h-full flex items-center justify-center text-sm text-zinc-500">Not supported on this engine</div>
+            ) : !connectionsThreadsHasData ? (
+              <div className="h-full flex items-center justify-center text-sm text-zinc-500">{noDataPlaceholder}</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={connectionsThreadsChartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3f3f46" opacity={0.2} />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#71717a' }} />
+                  <YAxis axisLine={false} tickLine={false} fontSize={11} tick={{ fill: '#71717a' }} width={38} />
+                  <Tooltip formatter={(value) => `${value}`} contentStyle={{ borderRadius: 10, border: '1px solid #d4d4d8', boxShadow: '0 8px 28px rgba(15,23,42,0.08)' }} />
+                  <Bar dataKey="value" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -855,14 +1102,20 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
             <CardDescription>Heavy tables, growth trend, index quality, and full-scan signals.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Largest Table</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topTablesBySize?.[0] ? `${detail.diagnostics.table.topTablesBySize[0].schemaName}.${detail.diagnostics.table.topTablesBySize[0].tableName}` : 'N/A'}</p></div>
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Largest Table Size</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topTablesBySize?.[0] ? `${fmtNum(detail.diagnostics.table.topTablesBySize[0].sizeMb)} MB` : 'N/A'}</p></div>
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Top Growth Table</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topGrowthTables?.[0]?.table || 'N/A'}</p></div>
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Growth Rate (MB/h)</p><p className="font-semibold mt-1">{fmtNum(detail.diagnostics?.table?.topGrowthTables?.[0]?.growthRateMbPerHour ?? null)}</p></div>
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Full Table Scans</p><p className="font-semibold mt-1">{detail.diagnostics?.index?.fullTableScans ?? detail.performance?.fullTableScans ?? 'N/A'}</p></div>
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">No Index Used</p><p className="font-semibold mt-1">{detail.diagnostics?.index?.noIndexUsedQueries ?? 'N/A'}</p></div>
-            </div>
+            {isNotSupported(tableIndexSupport.label) ? (
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-4 text-sm text-zinc-500">Not supported on this engine</div>
+            ) : !tableIndexHasData ? (
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-4 text-sm text-zinc-500">{noDataPlaceholder}</div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Largest Table</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topTablesBySize?.[0] ? `${detail.diagnostics.table.topTablesBySize[0].schemaName}.${detail.diagnostics.table.topTablesBySize[0].tableName}` : noDataPlaceholder}</p></div>
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Largest Table Size</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topTablesBySize?.[0] ? `${fmtNum(detail.diagnostics.table.topTablesBySize[0].sizeMb)} MB` : noDataPlaceholder}</p></div>
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Top Growth Table</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topGrowthTables?.[0]?.table || noDataPlaceholder}</p></div>
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Growth Rate (MB/h)</p><p className="font-semibold mt-1">{detail.diagnostics?.table?.topGrowthTables?.[0]?.growthRateMbPerHour == null ? noDataPlaceholder : fmtNum(detail.diagnostics.table.topGrowthTables[0].growthRateMbPerHour)}</p></div>
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">Full Table Scans</p><p className="font-semibold mt-1">{detail.diagnostics?.index?.fullTableScans ?? detail.performance?.fullTableScans ?? noDataPlaceholder}</p></div>
+                <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3"><p className="text-zinc-500">No Index Used</p><p className="font-semibold mt-1">{detail.diagnostics?.index?.noIndexUsedQueries ?? noDataPlaceholder}</p></div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -881,75 +1134,6 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
           </CardContent>
         </Card>
       </div>
-
-      <Card className="border-zinc-200 dark:border-zinc-800">
-        <CardHeader>
-          <CardTitle className="text-lg">Query-Level Metrics (Insights)</CardTitle>
-          <CardDescription>Performance Schema digest-level query execution, frequency, and index usage.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-3 text-sm">
-            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3">
-              <p className="text-zinc-500">Top Slow Queries</p>
-              <div className="mt-2 space-y-1">
-                {(detail.diagnostics?.query?.topSlowQueries || []).slice(0, 5).map((q: any, idx: number) => (
-                  <p key={`slow-${idx}`} className="truncate" title={q.digest}>{idx + 1}. {q.digest || 'N/A'} ({fmtNum(q.avgMs)} ms)</p>
-                ))}
-                {!(detail.diagnostics?.query?.topSlowQueries || []).length ? <p className="text-zinc-500">N/A</p> : null}
-              </div>
-            </div>
-            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3">
-              <p className="text-zinc-500">Top Failed Queries</p>
-              <div className="mt-2 space-y-1">
-                {(detail.diagnostics?.query?.topFailedQueries || []).slice(0, 5).map((q: any, idx: number) => (
-                  <p key={`failed-${idx}`} className="truncate" title={q.digest}>{idx + 1}. {q.digest || 'N/A'} (errors: {q.errors ?? 0})</p>
-                ))}
-                {!(detail.diagnostics?.query?.topFailedQueries || []).length ? <p className="text-zinc-500">N/A</p> : null}
-              </div>
-            </div>
-            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3">
-              <p className="text-zinc-500">Top Large Queries</p>
-              <div className="mt-2 space-y-1">
-                {(detail.diagnostics?.query?.topLargeQueries || []).slice(0, 5).map((q: any, idx: number) => (
-                  <p key={`large-${idx}`} className="truncate" title={q.digest}>{idx + 1}. {q.digest || 'N/A'} (rows: {q.rowsExamined ?? 0})</p>
-                ))}
-                {!(detail.diagnostics?.query?.topLargeQueries || []).length ? <p className="text-zinc-500">N/A</p> : null}
-              </div>
-            </div>
-          </div>
-
-          {!detail.diagnostics?.query?.performanceSchemaTopQueries?.length ? (
-            <div className="py-4 text-sm text-zinc-500">Performance Schema query digest data is unavailable for this target.</div>
-          ) : (
-            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-              <div className="max-h-[320px] overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent border-b border-zinc-100 dark:border-zinc-800 sticky top-0 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-sm z-10">
-                      <TableHead className="pl-4 font-semibold text-xs tracking-wider text-zinc-500/80 uppercase">Query</TableHead>
-                      <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase text-right">Frequency</TableHead>
-                      <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase text-right">Avg Ms</TableHead>
-                      <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase text-right">Total Ms</TableHead>
-                      <TableHead className="font-semibold text-xs tracking-wider text-zinc-500/80 uppercase text-right">No Index</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detail.diagnostics.query.performanceSchemaTopQueries.map((q: any, idx: number) => (
-                      <TableRow key={`${idx}-${q.digest}`} className={`border-b border-zinc-100 dark:border-zinc-800/60 ${idx % 2 === 0 ? 'bg-zinc-50/20 dark:bg-zinc-900/15' : ''}`}>
-                        <TableCell className="pl-4 py-3 max-w-[520px] truncate" title={q.digest}>{q.digest || 'N/A'}</TableCell>
-                        <TableCell className="text-right tabular-nums py-3">{q.count ?? 'N/A'}</TableCell>
-                        <TableCell className="text-right tabular-nums py-3">{fmtNum(q.avgMs)}</TableCell>
-                        <TableCell className="text-right tabular-nums py-3">{fmtNum(q.totalMs)}</TableCell>
-                        <TableCell className="text-right tabular-nums py-3">{(Number(q.noIndexUsed || 0) + Number(q.noGoodIndexUsed || 0)) || 0}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader>
@@ -979,16 +1163,16 @@ export default function DatabaseDetails({ targetKey, onBack }: DatabaseDetailsPr
         <CardContent className="grid gap-3 md:grid-cols-2 text-sm">
           <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3">
             <p className="text-zinc-500">Long/Slow Queries</p>
-            <p className="font-semibold mt-1">{(detail.diagnostics?.query?.slowQuerySampling?.length ?? detail.diagnostics?.query?.longRunningQueries?.length ?? detail.diagnostics?.query?.currentOperations?.length ?? 0)}</p>
-            <Badge variant="outline" className={`mt-2 ${metricSupportState(detail, detail.diagnostics?.query?.slowQuerySampling ?? detail.diagnostics?.query?.longRunningQueries ?? detail.diagnostics?.query?.currentOperations, 'featureSupported.queryDiagnostics.mysql.slowQuerySampling', ['mysql']).cls}`}>
-              {metricSupportState(detail, detail.diagnostics?.query?.slowQuerySampling ?? detail.diagnostics?.query?.longRunningQueries ?? detail.diagnostics?.query?.currentOperations, 'featureSupported.queryDiagnostics.mysql.slowQuerySampling', ['mysql']).label}
+            <p className="font-semibold mt-1">{isNotSupported(slowQueryDiagSupport.label) ? 'Not supported on this engine' : (slowQueryDiagCount > 0 ? slowQueryDiagCount : noDataPlaceholder)}</p>
+            <Badge variant="outline" className={`mt-2 ${slowQueryDiagSupport.cls}`}>
+              {slowQueryDiagSupport.label}
             </Badge>
           </div>
           <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3">
             <p className="text-zinc-500">Blocking Queries</p>
-            <p className="font-semibold mt-1">{detail.diagnostics?.query?.blockingQueries?.length ?? 'N/A'}</p>
-            <Badge variant="outline" className={`mt-2 ${metricSupportState(detail, detail.diagnostics?.query?.blockingQueries, 'featureSupported.queryDiagnostics.postgres.blockingQueries', ['postgres']).cls}`}>
-              {metricSupportState(detail, detail.diagnostics?.query?.blockingQueries, 'featureSupported.queryDiagnostics.postgres.blockingQueries', ['postgres']).label}
+            <p className="font-semibold mt-1">{isNotSupported(blockingQuerySupport.label) ? 'Not supported on this engine' : (blockingQueryCount > 0 ? blockingQueryCount : noDataPlaceholder)}</p>
+            <Badge variant="outline" className={`mt-2 ${blockingQuerySupport.cls}`}>
+              {blockingQuerySupport.label}
             </Badge>
           </div>
         </CardContent>

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { Activity, Server, AlertTriangle, Clock, CheckCircle2, TrendingUp, Wifi, Database, Building2, Rows3, Globe2, ShieldAlert, Brain, ArrowRight } from 'lucide-react';
+import { Activity, Server, AlertTriangle, Clock, CheckCircle2, TrendingUp, Wifi, Database, Building2, Rows3, Globe2, ShieldAlert } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadialBarChart, RadialBar, PolarAngleAxis, BarChart, Bar } from 'recharts';
 import { apiUrl } from '../../lib/api';
@@ -57,23 +56,6 @@ function timeAgo(ts: string | null): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
-}
-
-function previewText(value?: string | null, wordLimit = 200) {
-  if (!value) return 'AI summary will appear here once the observability engine finishes analyzing the current portal signals.';
-  const cleaned = value
-    .replace(/\*\*/g, '')
-    .replace(/\b\d+\)\s*/g, '')
-    .replace(/[•]/g, ' ')
-    .replace(/\s+-\s+/g, '. ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const normalized = cleaned
-    .replace(/(?:Top Risks|Probable Causes|Recommended Actions|Executive Summary|Observability Summary)\s*:/gi, '')
-    .replace(/\s*\.\s*\./g, '. ')
-    .trim();
-  const words = normalized.split(/\s+/).filter(Boolean);
-  return words.length > wordLimit ? `${words.slice(0, wordLimit).join(' ')}…` : normalized;
 }
 
 function DomainMiniVisualization({ domain }: { domain: any }) {
@@ -144,35 +126,9 @@ function DomainMiniVisualization({ domain }: { domain: any }) {
   );
 }
 
-type ObservabilitySnapshot = {
-  generatedAt?: string;
-  observations?: string[];
-  ai?: {
-    enabled?: boolean;
-    used?: boolean;
-    provider?: string;
-    summary?: string | null;
-    error?: string | null;
-  };
-  issues?: Array<{ severity: string }>;
-};
-
-const OBSERVABILITY_CACHE_KEY = 'portal-observability-summary-cache-v1';
-
-export default function OverviewPage({ onOpenObservability }: { onOpenObservability?: () => void }) {
+export default function OverviewPage() {
   const [data, setData] = useState<any>(null);
-  const [obsSnapshot, setObsSnapshot] = useState<ObservabilitySnapshot | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try {
-      const raw = window.localStorage.getItem(OBSERVABILITY_CACHE_KEY);
-      return raw ? JSON.parse(raw) as ObservabilitySnapshot : null;
-    } catch {
-      return null;
-    }
-  });
   const [loading, setLoading] = useState(true);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiExpanded, setAiExpanded] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -240,27 +196,6 @@ export default function OverviewPage({ onOpenObservability }: { onOpenObservabil
     datacenters: Building2,
     racks: Rows3,
     uptime: Globe2,
-  };
-
-  const aiSnapshotText = useMemo(() => {
-    return previewText(obsSnapshot?.ai?.summary || obsSnapshot?.observations?.[0] || null);
-  }, [obsSnapshot]);
-
-  const generateAiSnapshot = async () => {
-    setAiLoading(true);
-    try {
-      const res = await fetch(apiUrl('/api/observability/summary'));
-      const json = await res.json();
-      setObsSnapshot(json);
-      setAiExpanded(false);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(OBSERVABILITY_CACHE_KEY, JSON.stringify(json));
-      }
-    } catch {
-      // keep previous cached snapshot if available
-    } finally {
-      setAiLoading(false);
-    }
   };
 
   return (
@@ -374,62 +309,6 @@ export default function OverviewPage({ onOpenObservability }: { onOpenObservabil
                 </ResponsiveContainer>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-zinc-200 dark:border-zinc-800 shadow-sm bg-white/95 dark:bg-zinc-950/80">
-          <div className="h-1 w-full bg-gradient-to-r from-violet-500 via-sky-500 to-emerald-500" />
-          <CardHeader className="pb-2">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle className="text-base font-semibold flex items-center gap-2"><Brain className="w-4 h-4 text-violet-500" /> AI Observability Snapshot</CardTitle>
-                <CardDescription>On-demand executive intelligence from the observability engine, preserved locally until regenerated.</CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => onOpenObservability?.()}>
-                  Full observability <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-                </Button>
-                <Button size="sm" onClick={generateAiSnapshot} disabled={aiLoading}>
-                  {aiLoading ? 'Generating...' : obsSnapshot ? 'Regenerate AI Snapshot' : 'Generate AI Snapshot'}
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1">
-                <Brain className="w-3.5 h-3.5 text-violet-500" />
-                {obsSnapshot?.generatedAt ? `Saved snapshot · ${timeAgo(obsSnapshot.generatedAt)}` : 'No snapshot generated yet'}
-              </span>
-            </div>
-            <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
-              <p className="text-xs uppercase tracking-wide text-violet-600 dark:text-violet-300">AI summary</p>
-              <p className={`mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200 ${aiExpanded ? '' : 'line-clamp-4'}`}>
-                {obsSnapshot ? aiSnapshotText : 'Generate the AI snapshot on demand to capture a concise summary of the current observability and operational posture.'}
-              </p>
-              {obsSnapshot && aiSnapshotText.length > 180 ? (
-                <button
-                  type="button"
-                  onClick={() => setAiExpanded((value) => !value)}
-                  className="mt-2 text-xs font-medium text-violet-700 hover:text-violet-900 dark:text-violet-300 dark:hover:text-violet-200"
-                >
-                  {aiExpanded ? 'Less' : 'More'}
-                </button>
-              ) : null}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                <p className="text-xs text-zinc-500">Service posture</p>
-                <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                  {(data?.summary?.activeIssues ?? 0) > 0 ? 'Attention required' : 'Stable operations'}
-                </p>
-              </div>
-              <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                <p className="text-xs text-zinc-500">Observability issues</p>
-                <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{loading ? '—' : String(obsSnapshot?.issues?.length ?? 0)}</p>
-              </div>
-            </div>
-            <p className="text-xs text-zinc-500">The cached AI snapshot remains unchanged until you explicitly regenerate it or open the full observability workflow.</p>
           </CardContent>
         </Card>
 

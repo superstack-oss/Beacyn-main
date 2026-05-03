@@ -26,6 +26,47 @@ const app = express();
 const PORT = 5145;
 const execFileAsync = promisify(execFile);
 const DB_MONITOR_STALE_AFTER_SEC = Math.max(60, Number(process.env.DB_MONITOR_STALE_AFTER_SEC || 180));
+
+/**
+ * Resolve a UTC-correct Date from a database monitor row.
+ *
+ * mysql2 (without timezone:'Z') treats DATETIME columns as LOCAL time, but
+ * the agent writes collected_at in UTC.  This creates a false age offset equal
+ * to the server's UTC offset (e.g. +5:30 on IST), causing every checkpoint to
+ * appear hours stale and the target to be shown as Disconnected.
+ *
+ * Resolution order (most to least authoritative):
+ *  1. payload.collectedAt  — explicit ISO-8601 UTC string written by the agent
+ *  2. r.collected_at as a JS Date  — if mysql2 already boxed it, re-interpret
+ *     the wall-clock digits as UTC so the value is timezone-neutral
+ *  3. r.collected_at as a bare YYYY-MM-DD HH:MM:SS string — append 'Z'
+ */
+function resolveCollectedAt(dbRow: any, payload?: Record<string, any> | null): Date | null {
+  // 1. Authoritative ISO UTC from agent payload
+  const payloadTs = payload?.collectedAt;
+  if (payloadTs && typeof payloadTs === 'string') {
+    const d = new Date(payloadTs);
+    if (Number.isFinite(d.getTime())) return d;
+  }
+  const raw = dbRow?.collected_at;
+  if (raw == null) return null;
+  // 2. mysql2 returned a Date object — extract digits and re-parse as UTC
+  if (raw instanceof Date) {
+    const iso = raw.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    const d = new Date(iso + 'Z');
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  // 3. Bare string from mysql2 (dateStrings:true or custom driver config)
+  if (typeof raw === 'string') {
+    const normalised = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$/.test(raw.trim())
+      ? raw.trim().replace(' ', 'T') + 'Z'
+      : raw;
+    const d = new Date(normalised);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  return null;
+}
+
 const SNMP_DEFAULT_RETENTION_HOURS = Math.max(1, Number(process.env.SNMP_RETENTION_HOURS || 48));
 const SNMP_POLL_TIMEOUT_MS = Math.max(1000, Number(process.env.SNMP_POLL_TIMEOUT_MS || 8000));
 const SNMP_TRAP_ENABLED = (String(process.env.SNMP_TRAP_ENABLED || 'true').toLowerCase() === 'true');
@@ -1577,8 +1618,15 @@ app.post('/api/databases/ingest', async (req, res) => {
            database_uptime_sec, total_databases, total_tables, total_space_mb, used_space_mb, free_space_mb, used_pct,
            latency_ms, active_sessions, slow_queries, lock_count, replication_lag_sec,
            connection_utilization_pct, error_rate_pct, cpu_load_pct, memory_used_pct, disk_used_pct, host_pressure,
-           capability_matrix_json, db_signature, os_platform, os_distro, os_version, payload_json, collected_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           capability_matrix_json, db_signature, os_platform, os_distro, os_version,
+           health_category, health_reason,
+           qps, transactions_per_sec, threads_running, threads_connected, max_connections,
+           connection_errors, deadlocks, full_table_scans, lock_wait_ms,
+           buffer_cache_hit_pct, cache_hit_ratio_pct, redo_log_usage_pct, page_faults,
+           bytes_received, bytes_sent, transactions_waiting,
+           latency_trend_json, sessions_trend_json, qps_trend_json, tps_trend_json, connections_trend_json,
+           payload_json, collected_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           targetKey,
           targetName,
@@ -1612,6 +1660,29 @@ app.post('/api/databases/ingest', async (req, res) => {
           String(osInfo?.platform || '') || null,
           String(osInfo?.distro || '') || null,
           String(osInfo?.version || '') || null,
+          String(r?.healthCategory || '') || null,
+          String(r?.healthReason || r?.error || r?.reason || '') || null,
+          asNumber(perf?.qps ?? perf?.qpsRate),
+          asNumber(perf?.transactionsPerSec ?? perf?.transactionsPerSecRate),
+          asNumber(perf?.threadsRunning),
+          asNumber(perf?.threadsConnected),
+          asNumber(perf?.maxConnections),
+          asNumber(perf?.connectionErrors),
+          asNumber(perf?.deadlocks),
+          asNumber(perf?.fullTableScans),
+          asNumber(perf?.lockWaitMs),
+          asNumber(perf?.bufferCacheHitPct),
+          asNumber(perf?.cacheHitRatioPct),
+          asNumber(perf?.redoLogUsagePct),
+          asNumber(perf?.pageFaults),
+          asNumber(perf?.bytesReceived),
+          asNumber(perf?.bytesSent),
+          asNumber(perf?.transactionsWaiting),
+          Array.isArray(r?.latencyTrend) ? JSON.stringify(r.latencyTrend) : null,
+          Array.isArray(r?.sessionsTrend) ? JSON.stringify(r.sessionsTrend) : null,
+          Array.isArray(r?.qpsTrend) ? JSON.stringify(r.qpsTrend) : null,
+          Array.isArray(r?.tpsTrend) ? JSON.stringify(r.tpsTrend) : null,
+          Array.isArray(r?.connectionsTrend) ? JSON.stringify(r.connectionsTrend) : null,
           JSON.stringify(enrichedPayload),
           new Date(r?.collectedAt || collectedAt),
         ]
@@ -9335,13 +9406,17 @@ app.get('/api/databases', async (req, res) => {
       pageSize,
       total: Number(countRows[0]?.total || 0),
       databases: rows.map((r: any) => {
-        const nowMs = Date.now();
-        const collectedAt = r.collected_at ? new Date(r.collected_at) : null;
-        const checkpointAgeSec = collectedAt ? Math.max(0, Math.floor((nowMs - collectedAt.getTime()) / 1000)) : null;
-        const isStale = checkpointAgeSec == null ? true : checkpointAgeSec > DB_MONITOR_STALE_AFTER_SEC;
-        const normalizedStatus = String(r.status || '').toLowerCase() === 'connected' && !isStale ? 'Connected' : 'Disconnected';
+        // Parse payload first — resolveCollectedAt uses it to get the authoritative UTC timestamp.
         const payload = parsePayload(r.payload_json) || {};
         const capabilityMatrixColumn = parsePayload(r.capability_matrix_json) || null;
+        const nowMs = Date.now();
+        const collectedAt = resolveCollectedAt(r, payload);
+        const checkpointAgeSec = collectedAt ? Math.max(0, Math.floor((nowMs - collectedAt.getTime()) / 1000)) : null;
+        const isStale = checkpointAgeSec == null ? true : checkpointAgeSec > DB_MONITOR_STALE_AFTER_SEC;
+        // Honour the agent's own ok/status fields; only override with Disconnected when
+        // data is genuinely stale (agent went silent) or the agent itself reported failure.
+        const agentConnected = String(r.status || '').toLowerCase() === 'connected' && !!r.ok;
+        const normalizedStatus = agentConnected && !isStale ? 'Connected' : 'Disconnected';
         const capabilityMatrix = payload?.capabilityMatrix || capabilityMatrixColumn || null;
         const system = payload?.system || {
           cpu: { loadPct: r.cpu_load_pct == null ? null : Number(r.cpu_load_pct) },
@@ -9391,7 +9466,9 @@ app.get('/api/databases', async (req, res) => {
           osPlatform: r.os_platform,
           osDistro: r.os_distro,
           osVersion: r.os_version,
-          collectedAt: r.collected_at,
+          // Return the resolved UTC ISO string so the browser always gets a
+          // timezone-unambiguous value regardless of MySQL server timezone.
+          collectedAt: collectedAt ? collectedAt.toISOString() : null,
         };
       }),
     });
@@ -9548,6 +9625,80 @@ app.get('/api/databases/:targetKey', async (req, res) => {
     if (err?.code === 'ER_NO_SUCH_TABLE') {
       return res.status(404).json({ error: 'No database monitor data available' });
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Table metadata for a specific database within a monitored target.
+// Queries information_schema (read-only, schema-level) — no row data is exposed.
+app.get('/api/databases/:targetKey/tables/:dbName', async (req, res) => {
+  try {
+    const targetKey = String(req.params.targetKey || '').trim();
+    const dbName = String(req.params.dbName || '').trim();
+    if (!targetKey || !dbName) return res.status(400).json({ error: 'targetKey and dbName are required' });
+
+    // Verify the target exists and the requested dbName is part of its inventory.
+    // This prevents probing arbitrary schemas on the MySQL host.
+    const [targetRows]: any = await pool.query(
+      `SELECT payload_json FROM database_monitor_logs
+       WHERE target_key = ?
+       ORDER BY collected_at DESC LIMIT 1`,
+      [targetKey]
+    );
+    if (!targetRows.length) return res.status(404).json({ error: 'Target not found' });
+
+    const targetPayload = parsePayload(targetRows[0].payload_json) || {};
+    const inventoryDbs: string[] = (targetPayload?.inventory?.databases || [])
+      .map((d: any) => String(d.dbName || d.id || '').trim())
+      .filter(Boolean);
+
+    if (!inventoryDbs.includes(dbName)) {
+      return res.status(403).json({ error: 'Database is not part of this target\'s inventory' });
+    }
+
+    // Query information_schema — parameterised, read-only, schema-level metadata only.
+    const [tables]: any = await pool.query(
+      `SELECT
+         TABLE_NAME        AS tableName,
+         TABLE_TYPE        AS tableType,
+         ENGINE            AS engine,
+         TABLE_ROWS        AS tableRows,
+         AVG_ROW_LENGTH    AS avgRowLength,
+         DATA_LENGTH       AS dataLength,
+         INDEX_LENGTH      AS indexLength,
+         CREATE_TIME       AS createTime,
+         UPDATE_TIME       AS updateTime,
+         TABLE_COMMENT     AS tableComment,
+         TABLE_COLLATION   AS tableCollation,
+         ROW_FORMAT        AS rowFormat,
+         AUTO_INCREMENT    AS autoIncrement
+       FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = ?
+       ORDER BY TABLE_NAME ASC`,
+      [dbName]
+    );
+
+    res.json({
+      targetKey,
+      dbName,
+      totalTables: tables.length,
+      tables: tables.map((t: any) => ({
+        tableName:      String(t.tableName || ''),
+        tableType:      String(t.tableType || ''),
+        engine:         t.engine ? String(t.engine) : null,
+        tableRows:      t.tableRows == null ? null : Number(t.tableRows),
+        avgRowLength:   t.avgRowLength == null ? null : Number(t.avgRowLength),
+        dataLength:     t.dataLength == null ? null : Number(t.dataLength),
+        indexLength:    t.indexLength == null ? null : Number(t.indexLength),
+        createTime:     t.createTime ? new Date(t.createTime).toISOString() : null,
+        updateTime:     t.updateTime ? new Date(t.updateTime).toISOString() : null,
+        tableComment:   t.tableComment ? String(t.tableComment) : null,
+        tableCollation: t.tableCollation ? String(t.tableCollation) : null,
+        rowFormat:      t.rowFormat ? String(t.rowFormat) : null,
+        autoIncrement:  t.autoIncrement == null ? null : Number(t.autoIncrement),
+      })),
+    });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -10509,7 +10660,7 @@ app.get('/api/overview', async (_req, res) => {
     let databaseTargets: any[] = [];
     try {
       const [rows]: any = await pool.query(
-        `SELECT d.target_key, d.target_name, d.target_type, d.status, d.latency_ms, d.collected_at
+        `SELECT d.target_key, d.target_name, d.target_type, d.ok, d.status, d.latency_ms, d.collected_at, d.payload_json
          FROM database_monitor_logs d
          INNER JOIN (
            SELECT target_key, MAX(collected_at) AS max_collected
@@ -10520,17 +10671,19 @@ app.get('/api/overview', async (_req, res) => {
       );
 
       databaseTargets = (rows || []).map((row: any) => {
-        const collectedAt = row.collected_at ? new Date(row.collected_at) : null;
+        const rowPayload = parsePayload(row.payload_json) || null;
+        const collectedAt = resolveCollectedAt(row, rowPayload);
         const isStale = collectedAt
           ? Math.max(0, Math.floor((Date.now() - collectedAt.getTime()) / 1000)) > DB_MONITOR_STALE_AFTER_SEC
           : true;
-        const status = !isStale && String(row.status || '').toLowerCase() === 'connected' ? 'Up' : 'Down';
+        const agentConnected = String(row.status || '').toLowerCase() === 'connected' && !!row.ok;
+        const status = !isStale && agentConnected ? 'Up' : 'Down';
         return {
           id: String(row.target_key || row.target_name || Math.random()),
           name: row.target_name || row.target_key || 'Database Target',
           parent_type: row.target_type || 'Database',
           status,
-          timestamp: row.collected_at || null,
+          timestamp: collectedAt ? collectedAt.toISOString() : null,
           response_time_ms: row.latency_ms == null ? null : Number(row.latency_ms),
         };
       });
