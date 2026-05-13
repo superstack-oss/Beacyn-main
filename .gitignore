@@ -5,10 +5,14 @@ node_modules/
 dist/
 build/
 
+# Ignored directories (Local)
+docs
+bin
+code-review
+
+
 # EULA acceptance marker (machine-local, do not commit)
 .eula-accepted
-
-
 
 # Environment files
 .env

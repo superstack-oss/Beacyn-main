@@ -50,7 +50,7 @@ HELP
 done
 
 # ─── Repository ────────────────────────────────────────────────────────────────
-BEACYN_REPO_URL="${BEACYN_REPO_URL:-https://github.com/mackdev25/Beacyn-EMO.git}"
+BEACYN_REPO_URL="${BEACYN_REPO_URL:-https://github.com/superstack-oss/Beacyn-main.git}"
 BEACYN_BRANCH="${BEACYN_BRANCH:-main}"
 BEACYN_VERSION="2.0.1"
 
