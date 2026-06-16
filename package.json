@@ -28,7 +28,7 @@
     "dotenv": "^17.4.0",
     "express": "^5.2.1",
     "gamedig": "5.2.0",
-    "lighthouse": "^13.1.0",
+    "lighthouse": "^12.6.1",
     "lucide-react": "^1.3.0",
     "mysql2": "^3.20.0",
     "ping": "^1.0.0",
