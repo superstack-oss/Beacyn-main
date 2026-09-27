@@ -9,6 +9,7 @@ import { Skeleton } from '../../../components/ui/skeleton';
 import { Card, CardContent } from '../../../components/ui/card';
 import { BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import MonitorDetails from './MonitorDetails';
 import PageSpeedDetails from './PageSpeedDetails';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu';
@@ -39,14 +40,40 @@ function EmptyState({ title, message }: { title: string; message: string }) {
 }
 
 const TinyBarChart = ({ data }: { data: number[] }) => {
-  const chartData = data.map((val, i) => ({ name: `T${i}`, value: val }));
+  const chartData = data.map((val, i) => ({ time: `Check ${i + 1}`, value: val }));
+  const [tip, setTip] = useState<{ x: number; y: number; index: number } | null>(null);
+
+  const move = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    const index = Math.min(chartData.length - 1, Math.max(0, Math.floor(ratio * chartData.length)));
+    setTip({ x: event.clientX, y: event.clientY, index });
+  };
+
+  const point = tip ? chartData[tip.index] : null;
+
   return (
-    <div className="h-10 w-32 shrink-0">
+    <div
+      className="h-10 w-32 shrink-0"
+      onMouseMove={move}
+      onMouseLeave={() => setTip(null)}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} barCategoryGap={1}>
-          <Bar dataKey="value" fill="#22c55e" radius={[1, 1, 0, 0]} isAnimationActive={false} />
+          <Bar dataKey="value" fill="#22c55e" radius={[1, 1, 0, 0]} minPointSize={2} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
+      {point && tip ? createPortal(
+        <div
+          className="pointer-events-none fixed z-[80] -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
+          style={{ left: tip.x, top: tip.y }}
+        >
+          <div className="font-medium text-zinc-800 dark:text-zinc-100">{point.time}</div>
+          <div className="mt-0.5 tabular-nums text-zinc-600 dark:text-zinc-300">{point.value} ms</div>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   );
 };

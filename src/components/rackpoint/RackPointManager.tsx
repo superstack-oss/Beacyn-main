@@ -4,6 +4,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { CheckCircle2, ChevronLeft, MoreVertical, Pencil, Search, Trash2, X } from 'lucide-react';
+import { EmptyPlaceholder } from '../EmptyPlaceholder';
 import { apiUrl } from '../../lib/api';
 import { authHeaders, getStoredUser } from '../../lib/auth';
 
@@ -1032,7 +1033,7 @@ export default function RackPointManager() {
       {loadError ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{loadError}</div> : null}
       {selectedDc && !selectedDc.isAvailable ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">This data center is currently unavailable for RackPoint onboarding. Rack creation is disabled.</div> : null}
       {selectedDc ? <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/40 px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">Use the rack and device menus to edit or delete items. Devices can also be dragged to open U slots to change position.</div> : null}
-      {!selectedDc ? <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/40 px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">Select a data center to manage racks and devices. RackPoint is now reading the live Data Center inventory.</div> : null}
+      {!selectedDc && dataCenters.length > 0 ? <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/40 px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">Select a data center to manage racks and devices. RackPoint is now reading the live Data Center inventory.</div> : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryTile label="Total Racks" value={String(selectedDc ? selectedDc.rackCount : globalStats.rackCount)} sub={selectedDc ? `inside ${selectedDc.name}` : `across ${dcSummaries.length} data centers`} />
@@ -1050,20 +1051,22 @@ export default function RackPointManager() {
         <div className="flex items-center justify-center py-20 text-zinc-500 dark:text-zinc-400"><p>Loading RackPoint data...</p></div>
       ) : !selectedDc ? (
         filteredDcSummaries.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-zinc-300 bg-white/70 px-8 py-20 text-center dark:border-zinc-700 dark:bg-zinc-900/30">
-            <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">No data centers match the current search</p>
-            <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Try adjusting the search text.</p>
-          </div>
+          <EmptyPlaceholder
+            title={search ? 'No matching data centers' : 'No data centers yet'}
+            message={search ? `No data centers match "${search}".` : 'Register your first data center, then create racks and place devices.'}
+          />
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             {filteredDcSummaries.map((dc) => <DcCard key={dc.id} dc={dc} selected={dc.id === selectedDcId} onSelect={() => setSelectedDcId(dc.id)} />)}
           </div>
         )
       ) : selectedDcRacks.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-zinc-300 bg-white/70 px-8 py-20 text-center dark:border-zinc-700 dark:bg-zinc-900/30">
-          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">No racks created yet for {selectedDc.name}</p>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Create the first rack, then start placing devices into the correct U slots.</p>
-        </div>
+        <EmptyPlaceholder
+          title={search ? 'No matching racks' : `No racks yet for ${selectedDc.name}`}
+          message={search ? `No racks or devices match "${search}".` : 'Create the first rack, then start placing devices into the correct U slots.'}
+          actionLabel={!search && canManageSelectedDc ? 'Create your first rack' : undefined}
+          onAction={!search && canManageSelectedDc ? openRackForm : undefined}
+        />
       ) : (
         <div className="overflow-x-auto pb-6">
           <div className="flex gap-5" style={{ minWidth: 'max-content' }}>

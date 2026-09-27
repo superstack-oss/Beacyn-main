@@ -243,7 +243,7 @@ docker compose --env-file .env.docker.local exec beacyn-db mysql -u root -p
 
 ## Startup Sequence
 
-On every container start, `docker-entrypoint.sh` runs before the app launches:
+On every container start, `docker-entrypoint.mjs` runs before the app launches:
 
 1. Validates required environment variables
 2. Confirms the compiled frontend (`/app/dist`) exists

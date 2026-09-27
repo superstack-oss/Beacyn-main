@@ -5,7 +5,8 @@ import { Badge } from '../../../components/ui/badge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../../../components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { ChevronRight, Bug, TrendingUp, AlertTriangle, Gauge, Clock, RefreshCw, Network, ShieldCheck, Globe, Server, MailCheck, Info, Waves } from 'lucide-react';
-import { BarChart, Bar, ResponsiveContainer, AreaChart, Area, XAxis, CartesianGrid } from 'recharts';
+import { BarChart, Bar, ResponsiveContainer, AreaChart, Area, XAxis, CartesianGrid, Tooltip } from 'recharts';
+import { chartTipProps } from '../../../components/ChartPointTip';
 import { apiUrl } from '../../../lib/api';
 
 interface MonitorDetailsProps {
@@ -55,6 +56,12 @@ function formatDuration(ms: number): string {
 }
 
 // Response time quality label
+function formatChartTime(timestamp: string) {
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return '';
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 function responseLabel(ms: number): string {
   if (ms === 0 || ms == null) return '—';
   if (ms < 200) return 'Excellent';
@@ -412,7 +419,11 @@ export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', 
   const uptimeData = filteredLogsAsc
     .filter((d: any) => String(d.status).toLowerCase() === 'up')
     .slice(-60)
-    .map((d: any, i: number) => ({ name: `T${i}`, value: d.response_time_ms || 1 }));
+    .map((d: any) => ({
+      time: formatChartTime(d.timestamp),
+      value: Number(d.response_time_ms || 0),
+      status: 'Up',
+    }));
 
   const downtimeData = filteredLogsAsc
     .filter((d: any) => String(d.status).toLowerCase() === 'down')
@@ -422,9 +433,9 @@ export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', 
   const responseChartData = filteredLogsAsc
     .slice(-30)
     .map((l: any) => ({
-      time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      value: l.response_time_ms || 0,
-      status: l.status,
+      time: formatChartTime(l.timestamp),
+      value: Number(l.response_time_ms || 0),
+      status: l.status ? String(l.status) : undefined,
     }));
   const diagnostics = stats?.diagnostics;
   const summary = diagnostics?.summary;
@@ -659,7 +670,7 @@ export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
 
         {/* Uptime Bar Chart */}
-        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
+        <Card className="overflow-visible border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
           <CardHeader className="pb-0">
             <CardTitle className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
               <div className="p-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-md border border-zinc-200 dark:border-zinc-700">
@@ -674,7 +685,9 @@ export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', 
               {uptimeData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={112}>
                   <BarChart data={uptimeData} barCategoryGap={1}>
-                    <Bar dataKey="value" fill="#449d44" radius={[1, 1, 0, 0]} isAnimationActive={false} />
+                    <XAxis dataKey="time" hide />
+                    <Tooltip {...chartTipProps()} cursor={{ fill: 'rgba(68, 157, 68, 0.16)' }} shared />
+                    <Bar dataKey="value" name="Response" fill="#449d44" radius={[1, 1, 0, 0]} minPointSize={3} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
@@ -795,7 +808,7 @@ export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', 
       </div>
 
       {/* Response Time Chart */}
-      <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
+      <Card className="overflow-visible border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
         <CardHeader className="py-4 border-b border-zinc-100 dark:border-zinc-800">
           <CardTitle className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
             <div className="p-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-md border border-zinc-200 dark:border-zinc-700">
@@ -824,13 +837,16 @@ export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', 
                     dy={10}
                     minTickGap={40}
                   />
+                  <Tooltip {...chartTipProps()} cursor={{ stroke: '#3b82f6', strokeWidth: 1, strokeDasharray: '3 3' }} />
                   <Area
                     type="monotone"
                     dataKey="value"
+                    name="Response"
                     stroke="#3b82f6"
                     strokeWidth={2}
                     fillOpacity={1}
                     fill="url(#colorVal)"
+                    activeDot={{ r: 4, strokeWidth: 0 }}
                     isAnimationActive={false}
                   />
                 </AreaChart>

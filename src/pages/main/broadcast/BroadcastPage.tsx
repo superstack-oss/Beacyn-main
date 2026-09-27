@@ -7,6 +7,7 @@ import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../../../components/ui/dropdown-menu';
+import { EmptyPlaceholder } from '../../../components/EmptyPlaceholder';
 import { apiUrl } from '../../../lib/api';
 import { authHeaders } from '../../../lib/auth';
 
@@ -420,9 +421,12 @@ export default function BroadcastPage() {
           {loading ? (
             <div className="text-sm text-zinc-500">Loading status pages...</div>
           ) : pages.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
-              No custom status pages yet. Create one to publish a secure read-only health view.
-            </div>
+            <EmptyPlaceholder
+              title="No status pages yet"
+              message="Create a status page to publish a secure read-only health view."
+              actionLabel="Create your first status page"
+              onAction={() => { setEditingId(null); setShowForm(true); }}
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -503,7 +507,19 @@ export default function BroadcastPage() {
         </CardContent>
       </Card>
 
-      {notifications.length > 0 && (
+      {!loading && notifications.length === 0 ? (
+        <Card className="border-zinc-200 dark:border-zinc-800">
+          <CardHeader>
+            <CardTitle className="text-lg">Active Notifications</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EmptyPlaceholder
+              title="No notifications yet"
+              message="Broadcast a maintenance or incident notice once a status page is live."
+            />
+          </CardContent>
+        </Card>
+      ) : (
         <Card className="border-zinc-200 dark:border-zinc-800">
           <CardHeader>
             <CardTitle className="text-lg">Active Notifications</CardTitle>

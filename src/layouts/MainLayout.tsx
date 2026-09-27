@@ -92,7 +92,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     'infra-parent': false,
     'inventory-parent': false,
-    'portal-tools': true,
+    'portal-tools': false,
   });
   const [counts, setCounts] = useState({
     snmp: 0,

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../../components/ui/input';
 import { Skeleton } from '../../../components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
+import { EmptyPlaceholder } from '../../../components/EmptyPlaceholder';
 import { apiUrl } from '../../../lib/api';
 import { authHeaders } from '../../../lib/auth';
 
@@ -81,37 +82,42 @@ export default function DockerPage({ onOpenHost }: DockerPageProps) {
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search monitors or containers" />
           </div>
         </CardHeader>
-        <CardContent className="px-0 pt-0 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
-                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Name</TableHead>
-                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Target</TableHead>
-                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Status</TableHead>
-                <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Last checked</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
+        <CardContent className={loading || visibleMonitors.length > 0 ? 'px-0 pt-0 overflow-x-auto' : 'pt-0'}>
+          {loading ? (
+            <Table>
+              <TableBody>
                 <TableRow>
                   <TableCell colSpan={4} className="py-6"><Skeleton className="h-8 w-full" /></TableCell>
                 </TableRow>
-              ) : visibleMonitors.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-10 text-center text-sm text-zinc-500 whitespace-normal">
-                    No Docker monitors yet. Add one from Inventory with type Docker.
-                  </TableCell>
+              </TableBody>
+            </Table>
+          ) : visibleMonitors.length === 0 ? (
+            <EmptyPlaceholder
+              title={q ? 'No matching Docker monitors' : 'No Docker monitors yet'}
+              message={q ? `No Docker monitors match "${search.trim()}".` : 'Add a Docker monitor from Inventory to watch sockets and containers.'}
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Name</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Target</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Status</TableHead>
+                  <TableHead className="py-2 text-[10px] uppercase tracking-wide text-zinc-500">Last checked</TableHead>
                 </TableRow>
-              ) : visibleMonitors.map((row) => (
-                <TableRow key={row.id} className="border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors">
-                  <TableCell className="py-3 font-medium text-zinc-800 dark:text-zinc-100">{row.name}</TableCell>
-                  <TableCell className="py-3 text-zinc-600 dark:text-zinc-300">{row.target_endpoint || '—'}</TableCell>
-                  <TableCell className="py-3 text-zinc-600 dark:text-zinc-300">{row.status || 'Initializing'}</TableCell>
-                  <TableCell className="py-3 text-zinc-600 dark:text-zinc-300 tabular-nums">{row.last_checked_at ? new Date(row.last_checked_at).toLocaleString() : 'Never'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {visibleMonitors.map((row) => (
+                  <TableRow key={row.id} className="border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors">
+                    <TableCell className="py-3 font-medium text-zinc-800 dark:text-zinc-100">{row.name}</TableCell>
+                    <TableCell className="py-3 text-zinc-600 dark:text-zinc-300">{row.target_endpoint || '—'}</TableCell>
+                    <TableCell className="py-3 text-zinc-600 dark:text-zinc-300">{row.status || 'Initializing'}</TableCell>
+                    <TableCell className="py-3 text-zinc-600 dark:text-zinc-300 tabular-nums">{row.last_checked_at ? new Date(row.last_checked_at).toLocaleString() : 'Never'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -120,7 +126,21 @@ export default function DockerPage({ onOpenHost }: DockerPageProps) {
           <CardTitle className="text-lg text-zinc-800 dark:text-zinc-100">Host containers</CardTitle>
           <CardDescription className="text-zinc-500">Latest container telemetry reported by infrastructure agents.</CardDescription>
         </CardHeader>
-        <CardContent className="px-0 pt-0 overflow-x-auto">
+        <CardContent className={loading || visibleContainers.length > 0 ? 'px-0 pt-0 overflow-x-auto' : 'pt-0'}>
+          {loading ? (
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableCell colSpan={6} className="py-6"><Skeleton className="h-8 w-full" /></TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          ) : visibleContainers.length === 0 ? (
+            <EmptyPlaceholder
+              title={q ? 'No matching containers' : 'No containers yet'}
+              message={q ? `No host containers match "${search.trim()}".` : 'Agent telemetry appears here after a host publishes Docker stats.'}
+            />
+          ) : (
           <Table>
             <TableHeader>
               <TableRow className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
@@ -133,17 +153,7 @@ export default function DockerPage({ onOpenHost }: DockerPageProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-6"><Skeleton className="h-8 w-full" /></TableCell>
-                </TableRow>
-              ) : visibleContainers.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-500 whitespace-normal">
-                    No agent-reported containers. Open a server to see Docker telemetry once the agent publishes it.
-                  </TableCell>
-                </TableRow>
-              ) : visibleContainers.map((row) => (
+              {visibleContainers.map((row) => (
                 <TableRow key={`${row.agentId}-${row.containerId || row.name}`} className="border-b border-zinc-100/80 dark:border-zinc-800/80 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/30 transition-colors">
                   <TableCell className="py-3">
                     {onOpenHost && row.agentId ? (
@@ -163,6 +173,7 @@ export default function DockerPage({ onOpenHost }: DockerPageProps) {
               ))}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -9,27 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { apiUrl } from '../../../lib/api';
 import { authHeaders, getStoredUser } from '../../../lib/auth';
 import type { DataCenterSummary } from '../../../lib/datacenters';
-
-function EmptyState({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center px-4 py-12">
-      <div className="relative mb-6 h-28 w-48 select-none pointer-events-none">
-        <div className="absolute bottom-0 left-4 right-4 h-16 rotate-[-4deg] rounded-xl bg-zinc-100 shadow-sm" />
-        <div className="absolute bottom-2 left-2 right-2 h-16 rotate-[2deg] rounded-xl border border-zinc-100 bg-zinc-50 shadow" />
-        <div className="absolute bottom-4 left-0 right-0 flex h-16 items-center gap-3 rounded-xl border border-zinc-100 bg-white px-4 shadow">
-          <div className="h-8 w-10 shrink-0 rounded bg-zinc-100" />
-          <div className="flex flex-1 flex-col gap-1.5">
-            <div className="h-2.5 w-3/4 rounded-full bg-zinc-200" />
-            <div className="h-2 w-1/2 rounded-full bg-zinc-100" />
-            <div className="h-2 w-2/3 rounded-full bg-zinc-100" />
-          </div>
-        </div>
-      </div>
-      <h3 className="mb-1 text-sm font-semibold text-zinc-700">{title}</h3>
-      <p className="max-w-xs text-center text-xs text-zinc-400">{message}</p>
-    </div>
-  );
-}
+import { EmptyPlaceholder } from '../../../components/EmptyPlaceholder';
 
 interface DataCentersPageProps {
   onViewDetails: (dcId: string) => void;
@@ -161,20 +141,12 @@ export default function DataCentersPage({ onViewDetails, onAddNew, onOpenContinu
           ) : error ? (
             <div className="py-12 text-center text-red-600 dark:text-red-400">{error}</div>
           ) : filteredDCs.length === 0 ? (
-            <div className="rounded-xl border-2 border-dashed border-zinc-200/80 bg-zinc-50/40 dark:border-zinc-800 dark:bg-zinc-900/20">
-              <EmptyState
-                title={searchTerm ? 'No matching data centers' : 'No data centers yet'}
-                message={searchTerm ? `No data centers match "${searchTerm}".` : 'Register your first data center to begin the continuity workflow.'}
-              />
-              {!searchTerm && isAdmin ? (
-                <div className="-mt-4 flex justify-center pb-8">
-                  <Button onClick={onAddNew} variant="outline" className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Create your first data center
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+            <EmptyPlaceholder
+              title={searchTerm ? 'No matching data centers' : 'No data centers yet'}
+              message={searchTerm ? `No data centers match "${searchTerm}".` : 'Register your first data center to begin the continuity workflow.'}
+              actionLabel={!searchTerm && isAdmin ? 'Create your first data center' : undefined}
+              onAction={!searchTerm && isAdmin ? onAddNew : undefined}
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>

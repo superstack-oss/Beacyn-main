@@ -6,6 +6,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu';
 import { Search, Database, Settings, Eye, Bug, Download, Trash2 } from 'lucide-react';
+import { EmptyPlaceholder } from '../../../components/EmptyPlaceholder';
 import { apiUrl } from '../../../lib/api';
 
 interface DatabasePageProps {
@@ -232,7 +233,14 @@ export default function DatabasePage({ onOpenDetails, onOpenIncidents, onDelete 
             ))}
           </div>
         </CardHeader>
-        <CardContent className="px-0 pt-0">
+        <CardContent className={loading || rows.length > 0 ? 'px-0 pt-0' : 'pt-0'}>
+          {!loading && rows.length === 0 ? (
+            <EmptyPlaceholder
+              title={search || status !== 'All' ? 'No matching databases' : 'No databases yet'}
+              message={search || status !== 'All' ? 'No database targets match the current filters.' : 'Add a database monitor from Inventory to start collecting health, space, and latency.'}
+            />
+          ) : (
+          <>
           <div className="db-premium-table-wrap">
           <Table>
             <TableHeader>
@@ -251,10 +259,6 @@ export default function DatabasePage({ onOpenDetails, onOpenIncidents, onDelete 
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={8} className="py-10 text-center text-sm text-zinc-500">Loading database monitors...</TableCell>
-                </TableRow>
-              ) : rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center text-sm text-zinc-500">No database targets found.</TableCell>
                 </TableRow>
               ) : rows.map((row) => {
                 const stale = !!row.isStale || row.status === 'Disconnected';
@@ -356,6 +360,8 @@ export default function DatabasePage({ onOpenDetails, onOpenIncidents, onDelete 
               <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
             </div>
           </div>
+          </>
+          )}
         </CardContent>
       </Card>
     </div>

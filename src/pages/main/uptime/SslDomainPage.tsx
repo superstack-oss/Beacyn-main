@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, ExternalLink, FileDown, Plus, RefreshCw, Settings, ShieldCheck } from 'lucide-react';
+import { ChevronRight, ExternalLink, FileDown, Plus, RefreshCw, Settings } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
@@ -7,6 +7,7 @@ import { Skeleton } from '../../../components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../../../components/ui/sheet';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu';
+import { EmptyPlaceholder } from '../../../components/EmptyPlaceholder';
 import { apiUrl } from '../../../lib/api';
 import { authHeaders } from '../../../lib/auth';
 import actalisLogo from '../../../assets/ssl-logo/actalis.svg';
@@ -465,6 +466,14 @@ export default function SslDomainPage() {
         </Button>
       </div>
 
+      {!loading && assets.length === 0 ? (
+        <EmptyPlaceholder
+          title="No SSL & Domain monitors yet"
+          message="Add a hostname to read its live certificate and domain registration record."
+          actionLabel="Add your first monitor"
+          onAction={() => setAddOpen(true)}
+        />
+      ) : (
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <Table>
           <TableHeader>
@@ -478,15 +487,6 @@ export default function SslDomainPage() {
             {loading && assets.length === 0 && (
               <TableRow>
                 <TableCell colSpan={7} className="py-6"><Skeleton className="h-8 w-full" /></TableCell>
-              </TableRow>
-            )}
-            {!loading && assets.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={7} className="py-14 text-center whitespace-normal">
-                  <ShieldCheck className="mx-auto mb-2 h-5 w-5 text-zinc-400" />
-                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">No SSL & Domain monitors yet</p>
-                  <p className="mt-1 text-xs text-zinc-400">Add a hostname to read its live certificate and domain registration record.</p>
-                </TableCell>
               </TableRow>
             )}
             {paged.map((asset) => {
@@ -542,6 +542,7 @@ export default function SslDomainPage() {
           </div>
         </div>
       </div>
+      )}
 
       <Sheet open={addOpen} onOpenChange={setAddOpen}>
         <SheetContent>
