@@ -1,0 +1,33 @@
+# Build context is the repository root (see deployment/docker/docker-compose.yml).
+# Docker only reads .dockerignore from that context root.
+
+node_modules/
+dist/
+
+.git/
+.gitignore
+
+.env
+.env.*
+**/.env
+**/.env.*
+.eula-accepted
+
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+coverage/
+docs/
+code-review/
+**/*.md
+
+.beacynctl.env
+*.pid

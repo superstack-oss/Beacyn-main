@@ -2118,6 +2118,25 @@ async function ensureAssetCategoryColumn() {
   }
 }
 
+async function ensureAssetExpiryColumns() {
+  const columns = [
+    { name: 'domain_expiry_at', ddl: 'ALTER TABLE assets ADD COLUMN domain_expiry_at TIMESTAMP NULL' },
+    { name: 'domain_registrar', ddl: 'ALTER TABLE assets ADD COLUMN domain_registrar VARCHAR(255) NULL' },
+    { name: 'ssl_profile_json', ddl: 'ALTER TABLE assets ADD COLUMN ssl_profile_json JSON NULL' },
+  ];
+  for (const column of columns) {
+    const [rows]: any = await pool.query(
+      `SELECT COUNT(*) AS cnt
+       FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'assets' AND column_name = ?`,
+      [column.name]
+    );
+    if (!Number(rows?.[0]?.cnt || 0)) {
+      await pool.query(column.ddl);
+    }
+  }
+}
+
 async function ensureSettingsTable() {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS app_settings (
@@ -4768,15 +4787,66 @@ async function runCheck(asset: any) {
     const statusCode = result.statusCode || (result.ok ? 200 : 0);
     const now = new Date();
 
-    // Keep SSL expiry in sync when HTTPS targets are configured.
-    if (endpoint.startsWith('https://')) {
+    const persistCertExpiry = async (validTo: unknown) => {
+      if (!validTo) return;
+      const expiry = new Date(String(validTo));
+      if (Number.isNaN(expiry.getTime())) return;
+      await pool.query(`UPDATE assets SET ssl_expiry_at = ? WHERE id = ?`, [expiry, asset.id]);
+    };
+
+    if (result.kind === 'ssl') {
+      try {
+        const registration = result.diagnostics?.domainRegistration || {};
+        const domainExpiry = registration.expiresAt ? new Date(registration.expiresAt) : null;
+        const certExpiry = result.diagnostics?.validTo ? new Date(String(result.diagnostics.validTo)) : null;
+        const profile = {
+          host: result.diagnostics?.host || null,
+          port: result.diagnostics?.port || 443,
+          provider: result.diagnostics?.provider || null,
+          issuer: result.diagnostics?.issuer || null,
+          issuerOrg: result.diagnostics?.issuerOrg || null,
+          issuerCn: result.diagnostics?.issuerCn || null,
+          subject: result.diagnostics?.subject || null,
+          names: result.diagnostics?.names || [],
+          serial: result.diagnostics?.serial || null,
+          fingerprint: result.diagnostics?.fingerprint || null,
+          validFrom: result.diagnostics?.validFrom || null,
+          validTo: result.diagnostics?.validTo || null,
+          daysRemaining: result.diagnostics?.daysRemaining ?? null,
+          isExpired: Boolean(result.diagnostics?.isExpired),
+          notYetValid: Boolean(result.diagnostics?.notYetValid),
+          hostnameMatches: result.diagnostics?.hostnameMatches !== false,
+          isAuthorized: result.diagnostics?.isAuthorized !== false,
+          ok: result.ok,
+          message: result.message,
+          checkedAt: result.checkedAt,
+          domain: {
+            name: registration.domain || null,
+            expiresAt: registration.expiresAt || null,
+            registeredAt: registration.registeredAt || null,
+            registrar: registration.registrar || null,
+            statuses: registration.statuses || [],
+            nameServers: registration.nameServers || [],
+          },
+        };
+        await pool.query(
+          `UPDATE assets SET ssl_expiry_at = ?, domain_expiry_at = ?, domain_registrar = ?, ssl_profile_json = ? WHERE id = ?`,
+          [
+            certExpiry && !Number.isNaN(certExpiry.getTime()) ? certExpiry : null,
+            domainExpiry && !Number.isNaN(domainExpiry.getTime()) ? domainExpiry : null,
+            registration.registrar || null,
+            JSON.stringify(profile),
+            asset.id,
+          ]
+        );
+      } catch (expiryErr) {
+        console.warn(`SSL/domain expiry update skipped for ${asset.name}:`, expiryErr);
+      }
+    } else if (endpoint.startsWith('https://')) {
       try {
         const host = new URL(endpoint).hostname;
         const ssl = await monitorSSLTarget(host, 443);
-        const validTo = ssl.diagnostics?.validTo;
-        if (ssl.ok && validTo) {
-          await pool.query(`UPDATE assets SET ssl_expiry_at = ? WHERE id = ?`, [new Date(validTo), asset.id]);
-        }
+        await persistCertExpiry(ssl.diagnostics?.validTo);
       } catch {
         // SSL enrichment should not block core monitor flow.
       }
@@ -4815,7 +4885,9 @@ async function runCheck(asset: any) {
         resourceKey: asset.id,
         currentValue: 100,
         severity: 'P1',
-        description: `Asset ${asset.name || asset.id} is down or unreachable. Latest check failed: ${message}`,
+        description: result.kind === 'ssl'
+          ? `TLS check failed for ${asset.name || asset.id}. ${message}`
+          : `Asset ${asset.name || asset.id} is down or unreachable. Latest check failed: ${message}`,
         incidentTrigger: 'down-or-unreachable',
       });
     } else {
@@ -4887,6 +4959,7 @@ Promise.allSettled([
   ensureAgentIdentityColumns(),
   ensureDatabaseMonitorColumns(),
   ensureAssetCategoryColumn(),
+  ensureAssetExpiryColumns(),
   ensureSettingsTable(),
   ensureUsersTable(),
   ensureUserFeedbackTable(),
@@ -7893,6 +7966,39 @@ app.get('/api/infra', async (req, res) => {
 });
 
 // Infrastructure inventory list for large server fleets
+app.get('/api/infra/docker', async (_req, res) => {
+  try {
+    if (!(await hasNewInfraSchema())) return res.json({ containers: [] });
+    const [rows]: any = await pool.query(
+      `SELECT
+         d.agent_id AS agentId,
+         a.hostname,
+         a.agent_name AS agentName,
+         d.container_identifier AS containerId,
+         d.container_name AS name,
+         d.image_name AS image,
+         d.state_name AS state,
+         d.status_text AS status,
+         d.cpu_percent AS cpuPercent,
+         d.memory_percent AS memoryPercent
+       FROM ${infraTable('docker_container_stats')} d
+       INNER JOIN (
+         SELECT agent_id, MAX(snapshot_id) AS snapshot_id
+         FROM ${infraTable('docker_container_stats')}
+         GROUP BY agent_id
+       ) latest
+         ON latest.agent_id = d.agent_id
+        AND latest.snapshot_id = d.snapshot_id
+       LEFT JOIN ${infraTable('agents')} a ON a.id = d.agent_id
+       ORDER BY a.hostname ASC, d.container_name ASC`
+    );
+    res.json({ containers: rows || [] });
+  } catch (err: any) {
+    if (err?.code === 'ER_NO_SUCH_TABLE') return res.json({ containers: [] });
+    res.status(500).json({ error: err.message || 'Failed to load Docker containers' });
+  }
+});
+
 app.get('/api/infra/servers', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
@@ -9786,6 +9892,20 @@ app.post('/api/assets', async (req, res) => {
   }
 });
 
+app.post('/api/assets/:id/recheck', async (req, res) => {
+  const actor = requireDeviceOperator(req, res);
+  if (!actor) return;
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM assets WHERE id = ?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Asset not found' });
+    await runCheck(rows[0]);
+    const [updated]: any = await pool.query('SELECT * FROM assets WHERE id = ?', [req.params.id]);
+    res.json(updated[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to refresh monitor' });
+  }
+});
+
 // Update an asset's core configuration
 app.put('/api/assets/:id', async (req, res) => {
   const actor = requireDeviceOperator(req, res);
@@ -10333,12 +10453,16 @@ app.get('/api/assets/:id/stats', async (req, res) => {
     }
 
     // SSL expiry formatted
-    let sslExpiry = null;
-    if (asset.ssl_expiry_at) {
-      sslExpiry = new Date(asset.ssl_expiry_at).toLocaleString('en-US', {
+    const formatExpiry = (value: unknown) => {
+      if (!value) return null;
+      const date = new Date(value as string);
+      if (Number.isNaN(date.getTime())) return null;
+      return date.toLocaleString('en-US', {
         month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
       });
-    }
+    };
+    const sslExpiry = formatExpiry(asset.ssl_expiry_at);
+    const domainExpiry = formatExpiry(asset.domain_expiry_at);
 
     // Response time chart data (chronological)
     const chartData = [...logs].reverse().map((l: any) => ({
@@ -10359,6 +10483,8 @@ app.get('/api/assets/:id/stats', async (req, res) => {
       lastCheckAgo,
       lastResponseMs: asset.last_response_ms,
       sslExpiry,
+      domainExpiry,
+      domainRegistrar: asset.domain_registrar || null,
       totalChecks: logs.length,
       upChecks: upLogs.length,
       downChecks: downLogs.length,

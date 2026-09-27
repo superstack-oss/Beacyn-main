@@ -17,8 +17,9 @@ dist/
 
 # Local environment files (secrets must not enter the image)
 .env
-.env.local
-.env.*.local
+.env.*
+**/.env
+**/.env.*
 .eula-accepted
 
 # Logs
@@ -37,3 +38,12 @@ Thumbs.db
 
 # Test / coverage output
 coverage/
+
+# Docs and review notes are not needed to build the image
+docs/
+code-review/
+**/*.md
+
+# Local installer state
+.beacynctl.env
+*.pid

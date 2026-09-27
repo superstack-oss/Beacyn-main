@@ -5,6 +5,7 @@ import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { Settings, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, Info, AlertCircle, SlidersHorizontal, PauseCircle, Trash2 } from 'lucide-react';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { Card, CardContent } from '../../../components/ui/card';
 import { BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { useState, useEffect } from 'react';
@@ -106,6 +107,7 @@ function useCountUp(target: number, durationMs = 550, reduceMotion = false) {
 
 export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime' }) {
   const [endpoints, setEndpoints] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedMonitor, setSelectedMonitor] = useState<any>(null);
   const [selectedPageSpeedMonitor, setSelectedPageSpeedMonitor] = useState<any>(null);
   const [typeFilter, setTypeFilter] = useState('all');
@@ -221,7 +223,8 @@ export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime
             return data.map((d) => ({ ...(prevById.get(d.id) || {}), ...d }));
           });
         })
-        .catch(err => console.error('Error fetching monitors:', err));
+        .catch(err => console.error('Error fetching monitors:', err))
+        .finally(() => setLoading(false));
     };
     load();
     const interval = setInterval(load, 30_000); // auto-refresh every 30s
@@ -305,7 +308,7 @@ export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime
             { title: 'PAUSED', count: animatedPaused, color: 'text-amber-500' },
             { title: 'INITIALIZING', count: animatedInit, color: 'text-amber-500' }
           ].map((stat, i) => (
-            <Card key={i} className="bg-white dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 shadow-sm rounded-md h-28">
+            <Card key={i} className="bg-white dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 shadow-sm rounded-md h-28 transition-shadow duration-200 hover:shadow-md">
               <CardContent className="p-5 flex flex-col justify-center h-full">
                 <div className="text-xs font-semibold text-zinc-500/80 dark:text-zinc-400 tracking-wide mb-1.5">{stat.title}</div>
                 <div className={`text-4xl sm:text-5xl font-light tracking-tight transition-colors duration-500 ${stat.color}`}>
@@ -379,7 +382,18 @@ export default function WebMonitors({ scope = 'all' }: { scope?: 'all' | 'uptime
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paged.length === 0 && (
+              {loading && endpoints.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-6">
+                    <div className="space-y-2 px-2">
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-5/6" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+              {!loading && paged.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="p-0">
                     <div className="border-2 border-dashed border-zinc-100 rounded-lg m-4">

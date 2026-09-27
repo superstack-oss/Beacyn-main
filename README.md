@@ -101,6 +101,7 @@ Use the deployment bundles under [deployment](deployment):
 
 ## Documentation
 
+- How to run the project: [docs/how-to-run.md](docs/how-to-run.md)
 - Service management CLI: [docs/beacyn-service-management.md](docs/beacyn-service-management.md)
 - Deployment and scripts architecture: [docs/deployment-and-scripts.md](docs/deployment-and-scripts.md)
 - Docker guide: [docs/docker.md](docs/docker.md)

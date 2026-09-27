@@ -552,7 +552,10 @@ export default function DataCenterContinuityMapPage({ onBack }: DataCenterContin
               </div>
 
               <div className="overflow-auto rounded-3xl border border-zinc-200 dark:border-zinc-800">
-                <div ref={canvasRef} className="relative h-[620px] min-h-[620px] min-w-[960px] overflow-hidden bg-[linear-gradient(to_right,rgba(113,113,122,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(113,113,122,0.07)_1px,transparent_1px)] bg-[size:36px_36px] p-6 dark:bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] dark:bg-[size:36px_36px]">
+                <div
+                  ref={canvasRef}
+                  className="relative h-[clamp(420px,55vh,620px)] min-h-[320px] w-full min-w-[min(960px,100%)] overflow-hidden bg-[linear-gradient(to_right,rgba(113,113,122,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(113,113,122,0.07)_1px,transparent_1px)] bg-[size:36px_36px] p-6 dark:bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] dark:bg-[size:36px_36px]"
+                >
                   <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {sortedConnections.map((link) => {
                       const from = nodeMap.get(link.sourceDcId);
@@ -641,7 +644,7 @@ export default function DataCenterContinuityMapPage({ onBack }: DataCenterContin
                         className="absolute -translate-x-1/2 -translate-y-1/2 text-left"
                         style={{ left: `${node.mapPosX}%`, top: `${node.mapPosY}%` }}
                       >
-                        <div className={`min-w-[224px] rounded-2xl border px-4 py-3 shadow-sm backdrop-blur transition ${isPendingSource ? 'border-blue-400 bg-blue-50/95 ring-2 ring-blue-200 dark:border-blue-700 dark:bg-blue-950/80 dark:ring-blue-900/70' : isHoveredTarget ? 'border-teal-400 bg-teal-50/95 ring-2 ring-teal-200 dark:border-teal-700 dark:bg-teal-950/60 dark:ring-teal-900/70' : isConnected ? `${tone.node} bg-white/92 dark:bg-zinc-950/90` : 'border-zinc-200 bg-white/78 dark:border-zinc-800 dark:bg-zinc-950/78'}`}>
+                        <div className={`w-[min(224px,80vw)] min-w-0 rounded-2xl border px-4 py-3 shadow-sm backdrop-blur transition ${isPendingSource ? 'border-blue-400 bg-blue-50/95 ring-2 ring-blue-200 dark:border-blue-700 dark:bg-blue-950/80 dark:ring-blue-900/70' : isHoveredTarget ? 'border-teal-400 bg-teal-50/95 ring-2 ring-teal-200 dark:border-teal-700 dark:bg-teal-950/60 dark:ring-teal-900/70' : isConnected ? `${tone.node} bg-white/92 dark:bg-zinc-950/90` : 'border-zinc-200 bg-white/78 dark:border-zinc-800 dark:bg-zinc-950/78'}`}>
                           <div className="flex items-center gap-2">
                             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: isPendingSource ? '#2563eb' : isConnected ? '#0f766e' : '#9ca3af' }} />
                             <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">{node.name}</p>

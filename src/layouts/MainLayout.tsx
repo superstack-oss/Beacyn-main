@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  BarChart, Globe, Server,
+  BarChart, Globe, Server, ShieldCheck, Container,
   Settings, Terminal, Menu, X, Box,
   Moon, Sun, HelpCircle, RefreshCw, ChevronDown,
   Search, Network, Activity, Database, ChevronRight,
@@ -51,7 +51,9 @@ const PAGE_META: Record<string, { title: string; description?: string }> = {
   'inventory-agent': { title: 'Inventory • Agent',   description: 'Auto-detected agent-based infrastructure.' },
   'inventory-uptime': { title: 'Inventory • Uptime', description: 'User-configured uptime monitors.' },
   'monitors-web':   { title: 'Uptime',               description: 'Monitor website and API endpoint availability.' },
+  'ssl-domain':     { title: 'SSL & Domain',         description: 'Watch live certificates and domain registration expiry.' },
   infra:            { title: 'Infrastructure',       description: 'Fleet view of all infrastructure servers and utilization.' },
+  'infra-docker':   { title: 'Infrastructure • Docker', description: 'Docker monitors and containers reported by your hosts.' },
   'infra-servers':  { title: 'Infrastructure • Servers', description: 'Servers inventory with platform and utilization details.' },
   'infra-vms':      { title: 'Infrastructure • VMs', description: 'Virtual machine inventory and health.' },
   'infra-storage':  { title: 'Infrastructure • Storage', description: 'Storage systems and capacity views.' },
@@ -148,7 +150,12 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   }, [onRefresh]);
 
   useEffect(() => {
-    const infraActive = ['infra', 'infra-detail', 'infra-servers', 'infra-vms', 'infra-storage', 'infra-san', 'database', 'database-detail'].includes(currentRoute);
+    const main = document.querySelector('main');
+    if (main) main.scrollTop = 0;
+  }, [currentRoute]);
+
+  useEffect(() => {
+    const infraActive = ['infra', 'infra-detail', 'infra-servers', 'infra-vms', 'infra-storage', 'infra-san', 'infra-docker', 'database', 'database-detail'].includes(currentRoute);
     const inventoryActive = ['inventory', 'inventory-snmp', 'inventory-agent', 'inventory-uptime'].includes(currentRoute);
 
     setExpandedSections((prev) => ({
@@ -247,6 +254,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   const mainNav: NavNode[] = [
     { name: 'Overview', route: 'overview', icon: BarChart },
     { name: 'Uptime', route: 'monitors-web', icon: Globe },
+    { name: 'SSL & Domain', route: 'ssl-domain', icon: ShieldCheck },
     {
       name: 'Infrastructure',
       route: 'infra-parent',
@@ -257,7 +265,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
         { name: 'VMs', route: 'infra-vms', icon: Server, disabled: counts.vms === 0 },
         { name: 'Storage', route: 'infra-storage', icon: Database, disabled: counts.storage === 0 },
         { name: 'SAN', route: 'infra-san', icon: Router, disabled: counts.san === 0 },
-        
+        { name: 'Docker', route: 'infra-docker', icon: Container },
         { name: 'Database', route: 'database', icon: Database },
       ],
     },
@@ -291,7 +299,8 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   ];
 
   const isRouteActive = (route: string) => {
-    if (route === 'infra-parent') return currentRoute === 'infra' || currentRoute === 'infra-detail' || currentRoute === 'infra-servers' || currentRoute === 'infra-vms' || currentRoute === 'infra-storage' || currentRoute === 'infra-san' || currentRoute === 'database' || currentRoute === 'database-detail';
+    if (route === 'infra-parent') return currentRoute === 'infra' || currentRoute === 'infra-detail' || currentRoute === 'infra-servers' || currentRoute === 'infra-vms' || currentRoute === 'infra-storage' || currentRoute === 'infra-san' || currentRoute === 'infra-docker' || currentRoute === 'database' || currentRoute === 'database-detail';
+    if (route === 'infra-docker') return currentRoute === 'infra-docker';
     if (route === 'infra-servers') return currentRoute === 'infra' || currentRoute === 'infra-detail' || currentRoute === 'infra-servers';
     if (route === 'database') return currentRoute === 'database' || currentRoute === 'database-detail';
     if (route === 'inventory-parent') return currentRoute === 'inventory' || currentRoute === 'inventory-snmp' || currentRoute === 'inventory-agent' || currentRoute === 'inventory-uptime';
@@ -342,7 +351,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
           disabled={item.disabled}
           onClick={handleClick}
           aria-expanded={hasChildren ? sectionExpanded : undefined}
-          className={`w-full flex items-center ${nested ? 'pl-9 pr-3 py-1.5 text-xs' : 'px-3 py-2'} ${!nested && (item.route === 'inventory-parent' || item.route === 'access-requests' || item.route === 'portal-audit' || item.route === 'settings') ? 'text-xs' : !nested ? 'text-sm' : ''} font-medium rounded-md transition-colors ${item.disabled
+          className={`w-full flex items-center ${nested ? 'pl-9 pr-3 py-1.5 text-xs' : 'px-3 py-2'} ${!nested && (item.route === 'inventory-parent' || item.route === 'access-requests' || item.route === 'portal-audit' || item.route === 'settings') ? 'text-xs' : !nested ? 'text-sm' : ''} font-medium rounded-md transition-colors duration-200 ${item.disabled
             ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
             : active
               ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50'
@@ -455,9 +464,9 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-50 dark:bg-[#0c0c0e] text-zinc-900 dark:text-zinc-50 font-sans">
-      {/* Desktop sidebar */}
-      <div className="hidden md:flex md:flex-shrink-0">
+    <div className="flex h-dvh overflow-hidden bg-zinc-50 dark:bg-[#0c0c0e] text-zinc-900 dark:text-zinc-50 font-sans">
+      {/* Desktop sidebar stays fixed; only the main pane scrolls */}
+      <div className="hidden h-dvh shrink-0 md:sticky md:top-0 md:flex">
         {renderSidebarContent()}
       </div>
 
@@ -475,7 +484,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
 
       <div className="flex flex-col w-0 flex-1 overflow-hidden">
         {/* Mobile-only top bar for hamburger */}
-        <div className="flex items-center justify-between h-12 px-4 md:hidden bg-zinc-50 dark:bg-[#0c0c0e] shrink-0">
+        <div className="flex items-center justify-between min-h-12 px-4 pt-[env(safe-area-inset-top)] pb-2 md:hidden bg-zinc-50 dark:bg-[#0c0c0e] shrink-0">
           <div className="flex items-center gap-2">
             <img src={hexagonLogo} alt="Beacyn" className="w-5 h-5" />
             <span className="font-bold tracking-tight text-sm">Beacyn</span>
@@ -485,7 +494,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
           </Button>
         </div>
 
-        <main className="flex-1 relative z-0 overflow-y-auto focus:outline-none">
+        <main className="flex-1 relative z-0 min-h-0 overflow-y-auto overscroll-y-contain focus:outline-none">
           <div className="relative px-4 sm:px-6 md:px-8 max-w-[1600px] mx-auto">
             <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(to_right,#80808014_1px,transparent_1px),linear-gradient(to_bottom,#80808014_1px,transparent_1px)] bg-[size:14px_14px] dark:hidden" />
             <div className="pointer-events-none absolute inset-0 -z-10 hidden dark:block bg-[linear-gradient(to_right,#ffffff12_1px,transparent_1px),linear-gradient(to_bottom,#ffffff12_1px,transparent_1px)] bg-[size:14px_14px]" />
@@ -574,7 +583,7 @@ export function MainLayout({ children, currentRoute, setRoute, onLogout, onRefre
             </div>
 
             {/* Page content */}
-            <div className="pb-8">
+            <div className="pb-[max(2rem,env(safe-area-inset-bottom))]">
               {children}
             </div>
           </div>

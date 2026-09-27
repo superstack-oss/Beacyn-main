@@ -15,7 +15,7 @@
 #    --no-auto-path    Disable PATH auto-update (overrides env var)
 #    -h, --help        Show quick installer options
 # ═══════════════════════════════════════════════════════════════════════════════
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 NO_AUTO_PATH_FLAG=false
@@ -36,8 +36,14 @@ Environment overrides:
   BEACYN_REPO_URL
   BEACYN_BRANCH
   BEACYN_INSTALL_DIR
-  EULA_ACCEPTED
+  EULA_ACCEPTED          Set to true to skip the EULA prompt
+  BEACYN_ASSUME_YES      Set to true to accept default yes/no prompts
+  BEACYN_DB_PASSWORD     Database password for non-interactive installs
   BEACYNCTL_AUTO_PATH
+
+Non-interactive example:
+  EULA_ACCEPTED=true BEACYN_ASSUME_YES=true BEACYN_DB_PASSWORD='secret' \\
+    bash deployment/install.sh
 HELP
       exit 0
       ;;
@@ -156,6 +162,15 @@ ask_yn() {
   # ask_yn "Question" [default: y|n]  → returns 0 for yes, 1 for no
   local prompt="$1"
   local default="${2:-y}"
+  if [[ ! -r /dev/tty ]]; then
+    if [[ "${BEACYN_ASSUME_YES:-}" == "true" ]]; then
+      [[ "$default" == "y" ]]
+      return
+    fi
+    log_error "No interactive terminal for: ${prompt}"
+    log_info "Re-run in a terminal, or set EULA_ACCEPTED=true and BEACYN_ASSUME_YES=true."
+    exit 1
+  fi
   local hint
   [[ "$default" == "y" ]] && hint="${WHT}[Y/n]${RST}" || hint="${WHT}[y/N]${RST}"
   while true; do
@@ -178,6 +193,14 @@ ask_value() {
   local default="$2"
   local secret="${3:-}"   # pass "secret" to hide input
   local answer
+  if [[ ! -r /dev/tty ]]; then
+    if [[ "$secret" == "secret" && -n "${BEACYN_DB_PASSWORD+x}" ]]; then
+      printf '%s' "$BEACYN_DB_PASSWORD"
+      return
+    fi
+    printf '%s' "$default"
+    return
+  fi
   # Write prompt to /dev/tty so it is NOT captured by $(...) substitution
   printf "  ${BOLD}${WHT}%s${RST}  ${GRY}[%s]${RST}  " "$prompt" "$default" >/dev/tty
   if [[ "$secret" == "secret" ]]; then
@@ -190,6 +213,31 @@ ask_value() {
   answer="${answer#"${answer%%[! $'\t']*}"}"
   answer="${answer%"${answer##*[! $'\t']}"}"
   printf '%s' "${answer:-$default}"
+}
+
+valid_port() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  (( 10#$port >= 1 && 10#$port <= 65535 ))
+}
+
+env_dquote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/}"
+  value="${value//$'\r'/}"
+  printf '"%s"' "$value"
+}
+
+xml_escape() {
+  local value="$1"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  value="${value//\'/&apos;}"
+  value="${value//\"/&quot;}"
+  printf '%s' "$value"
 }
 
 # ─── Utility: check if port is free ───────────────────────────────────────────
@@ -402,6 +450,12 @@ if [[ "$INSTALL_NODE" == "true" ]]; then
       nvm use "$NODE_INSTALL_VERSION"
       ;;
   esac
+  hash -r || true
+  if ! has_cmd node || [[ "$(node_major)" -lt "$NODE_MIN_MAJOR" ]]; then
+    log_error "Node.js v${NODE_MIN_MAJOR}+ is still not available on PATH after installation."
+    log_info "Open a new shell, or add the Node.js bin directory to PATH, then re-run."
+    exit 1
+  fi
   log_ok "Node.js $(node --version) installed."
 fi
 
@@ -508,6 +562,10 @@ EULA_ENV="$(echo "${EULA_ACCEPTED:-}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$EULA_ENV" == "true" || "$EULA_ENV" == "1" || "$EULA_ENV" == "yes" ]]; then
   log_ok "EULA accepted via environment variable EULA_ACCEPTED."
   EULA_RESULT="accepted"
+elif [[ ! -r /dev/tty ]]; then
+  log_error "EULA acceptance is required."
+  log_info "Set EULA_ACCEPTED=true to accept non-interactively."
+  exit 1
 else
   sbox_top "END-USER LICENSE AGREEMENT (EULA)"
   sbox_empty
@@ -580,9 +638,20 @@ ln_blank
 sbox_top "Database (MySQL)"
 sbox_empty
 CFG_DB_HOST="$(ask_value "DB Host"     "localhost")"
+if [[ -z "$CFG_DB_HOST" ]]; then
+  log_error "DB Host cannot be empty."
+  exit 1
+fi
 CFG_DB_PORT="$DEFAULT_DB_PORT"
 CFG_DB_USER="$(ask_value "DB User"     "root")"
+if [[ -z "$CFG_DB_USER" ]]; then
+  log_error "DB User cannot be empty."
+  exit 1
+fi
 CFG_DB_PASS="$(ask_value "DB Password" ""         "secret")"
+if [[ -z "$CFG_DB_PASS" ]]; then
+  log_warn "DB password is empty. MySQL will reject the connection if a password is required."
+fi
 sbox_empty
 sbox_btm
 ln_blank
@@ -592,19 +661,34 @@ sbox_top "Service Ports"
 sbox_empty
 while true; do
   CFG_BACKEND_PORT="$(ask_value "Backend API port" "$DEFAULT_BACKEND_PORT")"
+  if ! valid_port "$CFG_BACKEND_PORT"; then
+    log_warn "Backend port must be a number from 1 to 65535."
+    [[ -r /dev/tty ]] || exit 1
+    continue
+  fi
   if port_free "$CFG_BACKEND_PORT"; then
     break
-  else
-    log_warn "Port ${CFG_BACKEND_PORT} is already in use. Choose a different port."
   fi
+  log_warn "Port ${CFG_BACKEND_PORT} is already in use. Choose a different port."
+  [[ -r /dev/tty ]] || exit 1
 done
 while true; do
   CFG_FRONTEND_PORT="$(ask_value "Frontend port" "$DEFAULT_FRONTEND_PORT")"
+  if ! valid_port "$CFG_FRONTEND_PORT"; then
+    log_warn "Frontend port must be a number from 1 to 65535."
+    [[ -r /dev/tty ]] || exit 1
+    continue
+  fi
+  if [[ "$CFG_FRONTEND_PORT" == "$CFG_BACKEND_PORT" ]]; then
+    log_warn "Frontend and backend cannot share port ${CFG_FRONTEND_PORT}."
+    [[ -r /dev/tty ]] || exit 1
+    continue
+  fi
   if port_free "$CFG_FRONTEND_PORT"; then
     break
-  else
-    log_warn "Port ${CFG_FRONTEND_PORT} is already in use. Choose a different port."
   fi
+  log_warn "Port ${CFG_FRONTEND_PORT} is already in use. Choose a different port."
+  [[ -r /dev/tty ]] || exit 1
 done
 sbox_empty
 sbox_btm
@@ -623,6 +707,11 @@ log_info "  Frontend:   ${FRONTEND_URL}"
 log_sep
 ln_blank
 
+if [[ "$CFG_BACKEND_PORT" != "5145" || "$CFG_FRONTEND_PORT" != "7145" ]]; then
+  log_warn "The API process listens on 5145 and Vite preview listens on 7145."
+  log_warn "Those ports are fixed in the application. Custom ports are stored in .env for reference."
+fi
+
 if ! ask_yn "Confirm configuration and begin installation?" "y"; then
   log_info "Installation cancelled."
   exit 0
@@ -638,7 +727,16 @@ log_step "Fetching Beacyn Source"
 log_info "Branch: ${BEACYN_BRANCH}"
 
 # Create install directory
-mkdir -p "$(dirname "$INSTALL_DIR")"
+INSTALL_PARENT="$(dirname "$INSTALL_DIR")"
+if ! mkdir -p "$INSTALL_PARENT"; then
+  log_error "Cannot create ${INSTALL_PARENT}."
+  exit 1
+fi
+if [[ ! -w "$INSTALL_PARENT" ]]; then
+  log_error "No write permission for ${INSTALL_PARENT}."
+  log_info "Choose another path with BEACYN_INSTALL_DIR, or re-run with permission to write there."
+  exit 1
+fi
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   log_info "Existing installation found — pulling latest changes…"
@@ -669,22 +767,28 @@ fi
 log_step "Installing Node.js Dependencies"
 
 cd "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR/logs"
 
 # Prefer ci for reproducible installs if lockfile exists
 if [[ -f "package-lock.json" ]]; then
   log_info "Running npm ci (lockfile found)…"
-  npm ci --prefer-offline 2>&1 | tail -5 | sed "s/^/  ${GRY}·${RST}  /"
+  if ! npm ci > "$INSTALL_DIR/logs/npm-ci.log" 2>&1; then
+    log_error "npm ci failed. Last lines from ${INSTALL_DIR}/logs/npm-ci.log:"
+    tail -30 "$INSTALL_DIR/logs/npm-ci.log" | sed "s/^/  /"
+    exit 1
+  fi
 else
   log_info "Running npm install…"
-  npm install 2>&1 | tail -5 | sed "s/^/  ${GRY}·${RST}  /"
+  if ! npm install > "$INSTALL_DIR/logs/npm-install.log" 2>&1; then
+    log_error "npm install failed. Last lines from ${INSTALL_DIR}/logs/npm-install.log:"
+    tail -30 "$INSTALL_DIR/logs/npm-install.log" | sed "s/^/  /"
+    exit 1
+  fi
 fi
 
 log_ok "Dependencies installed."
 
-# Build frontend assets for NODE_ENV=production (`vite preview` expects dist/)
-log_step "Building Frontend Assets"
-npm run build 2>&1 | tail -20 | sed "s/^/  ${GRY}·${RST}  /"
-log_ok "Frontend build completed."
+mkdir -p "$INSTALL_DIR/logs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 8 — Write .env
@@ -699,25 +803,40 @@ cat > "$ENV_FILE" <<EOF
 # ─────────────────────────────────────────────
 
 # ── Database ──────────────────────────────────
-DB_HOST=${CFG_DB_HOST}
-DB_PORT=${CFG_DB_PORT}
-DB_USER=${CFG_DB_USER}
-DB_PASSWORD=${CFG_DB_PASS}
-DB_NAME=pulseiq
-INFRA_DB_NAME=bsa
+DB_HOST=$(env_dquote "$CFG_DB_HOST")
+DB_PORT=$(env_dquote "$CFG_DB_PORT")
+DB_USER=$(env_dquote "$CFG_DB_USER")
+DB_PASSWORD=$(env_dquote "$CFG_DB_PASS")
+DB_NAME="pulseiq"
+INFRA_DB_NAME="bsa"
+DB_SSL="false"
 
-# ── Service ports ─────────────────────────────
-PORT=${CFG_BACKEND_PORT}
-VITE_APP_URL=${FRONTEND_URL}
+# ── Service URLs ──────────────────────────────
+PORT=$(env_dquote "$CFG_BACKEND_PORT")
+VITE_APP_URL=$(env_dquote "$FRONTEND_URL")
+VITE_API_BASE_URL=$(env_dquote "$BACKEND_URL")
+PULSE_API_BASE_URL=$(env_dquote "$BACKEND_URL")
 
 # ── Startup behaviour ─────────────────────────
-EULA_ACCEPTED=true
-NODE_ENV=production
+EULA_ACCEPTED="true"
+NODE_ENV="production"
 EOF
 
 # Restrict file permissions — contains DB password
 chmod 600 "$ENV_FILE"
 log_ok ".env written and permissions set to 600."
+
+# Build after .env exists so the browser bundle receives the API URL.
+log_step "Building Frontend Assets"
+export VITE_API_BASE_URL="$BACKEND_URL"
+export VITE_APP_URL="$FRONTEND_URL"
+export NODE_ENV=production
+if ! npm run build > "$INSTALL_DIR/logs/install-build.log" 2>&1; then
+  log_error "Frontend build failed. Last lines from ${INSTALL_DIR}/logs/install-build.log:"
+  tail -30 "$INSTALL_DIR/logs/install-build.log" | sed "s/^/  /"
+  exit 1
+fi
+log_ok "Frontend build completed."
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 9 — Create Databases & Schema
@@ -736,11 +855,11 @@ if mysql -h "$CFG_DB_HOST" -P "$CFG_DB_PORT" -u "$CFG_DB_USER" \
 fi
 
 if [[ $MYSQL_CONN_TEST -eq 0 ]]; then
-  log_warn "Cannot connect to MySQL with the provided credentials."
+  log_error "Cannot connect to MySQL with the provided credentials."
   log_info "Ensure MySQL is running and the credentials are correct, then re-run."
   log_info "  mysql -h ${CFG_DB_HOST} -P ${CFG_DB_PORT} -u ${CFG_DB_USER} -p"
-  log_error "Database setup skipped — please run ${CYN}npm run initdb${RST}${RED} manually once MySQL is accessible."
-else
+  exit 1
+fi
   log_ok "MySQL connection successful."
 
   # Detect existing databases and require explicit consent before overwrite.
@@ -793,10 +912,13 @@ else
 
   # Create pulseiq + all application tables via the built-in init script
   log_info "Initialising 'pulseiq' schema (this may take a moment)…"
-  npm run initdb 2>&1 | grep -E '(ready|error|warn|Table|Database|Seeded|Error)' \
-    | sed "s/^/  ${GRY}·${RST}  /" || true
+  mkdir -p "$INSTALL_DIR/logs"
+  if ! npm run initdb > "$INSTALL_DIR/logs/initdb.log" 2>&1; then
+    log_error "Database initialisation failed. Last lines from ${INSTALL_DIR}/logs/initdb.log:"
+    tail -30 "$INSTALL_DIR/logs/initdb.log" | sed "s/^/  /"
+    exit 1
+  fi
   log_ok "Database schema applied successfully."
-fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 10 — Install as System Service
@@ -832,6 +954,14 @@ if [[ "$OS_NAME" == "macos" ]]; then
   SERVICE_LOG_PATH="${LAUNCHD_LOG_DIR}/beacyn.log"
   SERVICE_ERR_LOG_PATH="${LAUNCHD_LOG_DIR}/beacyn-error.log"
 
+  XML_DB_HOST="$(xml_escape "$CFG_DB_HOST")"
+  XML_DB_PORT="$(xml_escape "$CFG_DB_PORT")"
+  XML_DB_USER="$(xml_escape "$CFG_DB_USER")"
+  XML_DB_PASS="$(xml_escape "$CFG_DB_PASS")"
+  XML_BACKEND_PORT="$(xml_escape "$CFG_BACKEND_PORT")"
+  XML_FRONTEND_URL="$(xml_escape "$FRONTEND_URL")"
+  XML_BACKEND_URL="$(xml_escape "$BACKEND_URL")"
+
   cat > "$PLIST_FILE" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -848,15 +978,17 @@ if [[ "$OS_NAME" == "macos" ]]; then
   <key>WorkingDirectory</key>  <string>${INSTALL_DIR}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>            <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>DB_HOST</key>         <string>${CFG_DB_HOST}</string>
-    <key>DB_PORT</key>         <string>${CFG_DB_PORT}</string>
-    <key>DB_USER</key>         <string>${CFG_DB_USER}</string>
-    <key>DB_PASSWORD</key>     <string>${CFG_DB_PASS}</string>
+    <key>PATH</key>            <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>DB_HOST</key>         <string>${XML_DB_HOST}</string>
+    <key>DB_PORT</key>         <string>${XML_DB_PORT}</string>
+    <key>DB_USER</key>         <string>${XML_DB_USER}</string>
+    <key>DB_PASSWORD</key>     <string>${XML_DB_PASS}</string>
     <key>DB_NAME</key>         <string>pulseiq</string>
     <key>INFRA_DB_NAME</key>   <string>bsa</string>
-    <key>PORT</key>            <string>${CFG_BACKEND_PORT}</string>
-    <key>VITE_APP_URL</key>    <string>${FRONTEND_URL}</string>
+    <key>PORT</key>            <string>${XML_BACKEND_PORT}</string>
+    <key>VITE_APP_URL</key>    <string>${XML_FRONTEND_URL}</string>
+    <key>VITE_API_BASE_URL</key> <string>${XML_BACKEND_URL}</string>
+    <key>PULSE_API_BASE_URL</key> <string>${XML_BACKEND_URL}</string>
     <key>EULA_ACCEPTED</key>   <string>true</string>
     <key>NODE_ENV</key>        <string>production</string>
   </dict>
@@ -898,16 +1030,7 @@ RestartSec=10
 StandardOutput=append:/var/log/beacyn/beacyn.log
 StandardError=append:/var/log/beacyn/beacyn-error.log
 
-Environment="DB_HOST=${CFG_DB_HOST}"
-Environment="DB_PORT=${CFG_DB_PORT}"
-Environment="DB_USER=${CFG_DB_USER}"
-Environment="DB_PASSWORD=${CFG_DB_PASS}"
-Environment="DB_NAME=pulseiq"
-Environment="INFRA_DB_NAME=bsa"
-Environment="PORT=${CFG_BACKEND_PORT}"
-Environment="VITE_APP_URL=${FRONTEND_URL}"
-Environment="EULA_ACCEPTED=true"
-Environment="NODE_ENV=production"
+EnvironmentFile=${ENV_FILE}
 
 [Install]
 WantedBy=multi-user.target

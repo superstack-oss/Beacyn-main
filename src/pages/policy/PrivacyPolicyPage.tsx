@@ -26,7 +26,7 @@ export default function PrivacyPolicyPage() {
   }, [isDark]);
 
   return (
-    <div className="relative min-h-screen bg-zinc-50 dark:bg-zinc-950 font-sans transition-colors duration-200">
+    <div className="relative min-h-[100dvh] bg-zinc-50 dark:bg-zinc-950 font-sans transition-colors duration-200">
 
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)] bg-[size:14px_14px] dark:hidden" />
       <div className="pointer-events-none absolute inset-0 hidden dark:block bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] bg-[size:14px_14px]" />

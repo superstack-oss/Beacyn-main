@@ -11,6 +11,7 @@ import { apiUrl } from '../../../lib/api';
 interface MonitorDetailsProps {
   monitor: any;
   onBack: () => void;
+  backLabel?: string;
   onOpenPageSpeed?: (monitor: any) => void;
 }
 
@@ -185,13 +186,14 @@ function selectErrorGuide(entries: ErrorGuideEntry[], diagnostics: any, recentLo
   return bestScore > 0 ? winner : null;
 }
 
-export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: MonitorDetailsProps) {
+export default function MonitorDetails({ monitor, onBack, backLabel = 'Uptime', onOpenPageSpeed }: MonitorDetailsProps) {
   const [stats, setStats] = useState<any>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState('Recent');
   const [runningDiagnostics, setRunningDiagnostics] = useState(false);
+  const [diagnosticsPage, setDiagnosticsPage] = useState(false);
   const [checksPage, setChecksPage] = useState(1);
 
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -328,15 +330,17 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
   };
 
   useEffect(() => {
+    setDiagnosticsPage(false);
     fetchStats(true);
     const interval = setInterval(fetchStats, 30_000); // auto-refresh every 30s
     return () => clearInterval(interval);
   }, [monitor.id]);
 
   useEffect(() => {
+    if (!diagnosticsPage) return;
     fetchDiagnosticsHistory(1, rootCauseFilter);
     fetchAlertRules();
-  }, [monitor.id, rootCauseFilter]);
+  }, [monitor.id, rootCauseFilter, diagnosticsPage]);
 
   // Fetch syslog events correlated to the monitor's target hostname
   useEffect(() => {
@@ -360,9 +364,10 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
         if (!ignore) setSyslogLoading(false);
       }
     };
+    if (!diagnosticsPage) return;
     fetchSyslogs();
     return () => { ignore = true; };
-  }, [monitor.id]);
+  }, [monitor.id, diagnosticsPage]);
 
   useEffect(() => {
     const loadErrorGuide = async () => {
@@ -375,8 +380,9 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
         setErrorGuideEntries([]);
       }
     };
+    if (!diagnosticsPage) return;
     loadErrorGuide();
-  }, []);
+  }, [diagnosticsPage]);
 
   useEffect(() => {
     if (incidentsOpen) fetchActiveTickets();
@@ -474,9 +480,17 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <button onClick={onBack} className="text-blue-500 hover:underline font-medium">Uptime</button>
+        <button onClick={onBack} className="text-blue-500 hover:underline font-medium">{backLabel}</button>
         <ChevronRight className="w-4 h-4 text-zinc-400" />
-        <span className="text-blue-500 font-medium">Details</span>
+        {diagnosticsPage ? (
+          <>
+            <button type="button" onClick={() => setDiagnosticsPage(false)} className="text-blue-500 hover:underline font-medium">Details</button>
+            <ChevronRight className="w-4 h-4 text-zinc-400" />
+            <span className="text-blue-500 font-medium">Diagnostics</span>
+          </>
+        ) : (
+          <span className="text-blue-500 font-medium">Details</span>
+        )}
       </div>
 
       {/* Error Banner */}
@@ -488,6 +502,7 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
         </div>
       )}
 
+      {!diagnosticsPage && <>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
@@ -507,7 +522,16 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
           <Button variant="ghost" size="sm" className="text-zinc-600 dark:text-zinc-300 bg-transparent shadow-none border-0 px-2" onClick={() => onOpenPageSpeed?.(monitor)}>
             <Gauge className="w-3.5 h-3.5 mr-1.5" /> PageSpeed
           </Button>
-          <Button variant="ghost" size="sm" className="text-zinc-700 dark:text-zinc-200 bg-transparent shadow-none border-0 px-2" onClick={runDiagnosticsNow} disabled={runningDiagnostics}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-zinc-700 dark:text-zinc-200 bg-transparent shadow-none border-0 px-2"
+            onClick={() => {
+              setDiagnosticsPage(true);
+              void runDiagnosticsNow();
+            }}
+            disabled={runningDiagnostics}
+          >
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${runningDiagnostics ? 'animate-spin' : ''}`} />
             {runningDiagnostics ? 'Running diagnostics...' : 'Run full diagnostics now'}
           </Button>
@@ -599,10 +623,14 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
 
         {/* SSL / Certificate Expiry */}
         <Card className="bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 shadow-sm rounded-md">
-          <CardContent className="p-4 flex flex-col justify-center h-24">
+          <CardContent className="p-4 flex flex-col justify-center min-h-24">
             <div className="text-sm font-medium text-zinc-500 mb-1">Certificate expiry</div>
-            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 leading-snug">
+            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 leading-snug tabular-nums">
               {initialLoading ? '...' : (stats?.sslExpiry || 'N/A')}
+            </div>
+            <div className="text-[11px] text-zinc-500 mt-1 truncate tabular-nums">
+              Domain {initialLoading ? '...' : (stats?.domainExpiry || 'Not reported')}
+              {stats?.domainRegistrar ? ` · ${stats.domainRegistrar}` : ''}
             </div>
           </CardContent>
         </Card>
@@ -815,6 +843,19 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
           </div>
         </CardContent>
       </Card>
+      </>}
+
+      {diagnosticsPage && <>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mb-2">{monitor.name}</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Full diagnostics for {monitor.target_endpoint}</p>
+        </div>
+        <Button variant="ghost" size="sm" className="text-zinc-700 dark:text-zinc-200 bg-transparent shadow-none border-0 px-2" onClick={runDiagnosticsNow} disabled={runningDiagnostics}>
+          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${runningDiagnostics ? 'animate-spin' : ''}`} />
+          {runningDiagnostics ? 'Running diagnostics...' : 'Run again'}
+        </Button>
+      </div>
 
       {/* Advanced Diagnostics */}
       <div className="space-y-4">
@@ -1173,7 +1214,9 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
           </div>
         </CardContent>
       </Card>
+      </>}
 
+      {!diagnosticsPage && <>
       {/* Check History Table */}
       <div className="border border-zinc-200 dark:border-zinc-800 rounded-md bg-white dark:bg-zinc-950 shadow-sm overflow-hidden">
         <Table>
@@ -1232,7 +1275,9 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
           </div>
         </div>
       </div>
+      </>}
 
+      {diagnosticsPage && <>
       {/* Related Syslog Logs */}
       <Card className="border-zinc-200 dark:border-zinc-800">
         <CardHeader>
@@ -1288,6 +1333,7 @@ export default function MonitorDetails({ monitor, onBack, onOpenPageSpeed }: Mon
           )}
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }

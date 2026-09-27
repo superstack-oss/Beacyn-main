@@ -3,7 +3,7 @@ name: beacyn-ngnix
 services:
   app:
     container_name: beacyn-app
-    image: beacyn-app:2.0.1
+    image: ${BEACYN_IMAGE:-superstackinc/beacyn:latest}
     build:
       context: ../../
       dockerfile: deployment/docker/Dockerfile
@@ -59,18 +59,27 @@ services:
       MYSQL_DATABASE: ${DB_NAME:-pulseiq}
     volumes:
       - beacyn-mysql-data:/var/lib/mysql
-      - ../docker/mysql-init:/docker-entrypoint-initdb.d:ro
-      - ../../db:/docker-entrypoint-schemas:ro
+      - ../docker/mysql-init:/opt/beacyn-init:ro
+      - ../../db:/opt/beacyn-schemas:ro
     ports:
       - "${DB_EXPOSE_PORT:-3316}:3306"
     networks:
       - beacyn-net
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /docker-entrypoint-initdb.d /docker-entrypoint-schemas
+        cp -a /opt/beacyn-init/. /docker-entrypoint-initdb.d/
+        cp -a /opt/beacyn-schemas/. /docker-entrypoint-schemas/
+        chmod 755 /docker-entrypoint-initdb.d/*.sh
+        exec docker-entrypoint.sh mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 30s
+      start_period: 40s
 
   nginx:
     container_name: beacyn-nginx

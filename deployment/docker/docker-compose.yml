@@ -94,7 +94,8 @@ services:
   # ── Application ─────────────────────────────────────────────────────────────
   app:
     container_name: beacyn-app
-    image: beacyn-app:2.0.1
+    image: ${BEACYN_IMAGE:-superstackinc/beacyn:latest}
+    pull_policy: missing
     build:
       context: ../../
       dockerfile: deployment/docker/Dockerfile
@@ -102,9 +103,13 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5145}
         VITE_APP_URL:      ${VITE_APP_URL:-http://localhost:7145}
     restart: unless-stopped
+    init: true
     ports:
       - "${BACKEND_PORT:-5145}:5145"
       - "${FRONTEND_PORT:-7145}:7145"
+      - "${SNMP_TRAP_PORT:-9162}:${SNMP_TRAP_PORT:-9162}/udp"
+      - "${SYSLOG_UDP_PORT:-5514}:${SYSLOG_UDP_PORT:-5514}/udp"
+      - "${SYSLOG_TCP_PORT:-5514}:${SYSLOG_TCP_PORT:-5514}"
     environment:
       NODE_ENV:               production
       EULA_ACCEPTED:          "true"
@@ -135,11 +140,23 @@ services:
       SNOW_USERNAME:          ${SNOW_USERNAME:-}
       SNOW_PASSWORD:          ${SNOW_PASSWORD:-}
       SNOW_ASSIGNMENT_GROUP:  ${SNOW_ASSIGNMENT_GROUP:-}
+      PORTAL_MONITOR_KEY:     ${PORTAL_MONITOR_KEY:-}
     depends_on:
       beacyn-db:
         condition: service_healthy
     networks:
       - beacyn-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5145/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── MySQL 8 ─────────────────────────────────────────────────────────────────
   beacyn-db:
@@ -151,18 +168,34 @@ services:
       MYSQL_DATABASE:      ${DB_NAME:-pulseiq}
     volumes:
       - beacyn-mysql-data:/var/lib/mysql
-      - ./mysql-init:/docker-entrypoint-initdb.d:ro
-      - ../../db:/docker-entrypoint-schemas:ro
+      # Bind mounts from the host can be noexec. Copy into the container
+      # filesystem, then let the official entrypoint run the scripts.
+      - ./mysql-init:/opt/beacyn-init:ro
+      - ../../db:/opt/beacyn-schemas:ro
     ports:
       - "${DB_EXPOSE_PORT:-3316}:3306"
     networks:
       - beacyn-net
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /docker-entrypoint-initdb.d /docker-entrypoint-schemas
+        cp -a /opt/beacyn-init/. /docker-entrypoint-initdb.d/
+        cp -a /opt/beacyn-schemas/. /docker-entrypoint-schemas/
+        chmod 755 /docker-entrypoint-initdb.d/*.sh
+        exec docker-entrypoint.sh mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test:         ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
-      interval:     10s
-      timeout:      5s
-      retries:      12
-      start_period: 30s
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── NGINX — profile: nginx ───────────────────────────────────────────────────
   # Private / LAN exposure. Proxies:
@@ -183,9 +216,16 @@ services:
       # Mount SSL certs (optional). Create the dir even if empty.
       - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     networks:
       - beacyn-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # ── Cloudflare Tunnel — profile: cloudflare ──────────────────────────────────
   # Public internet exposure via a zero-trust Cloudflare Tunnel.
@@ -209,7 +249,8 @@ services:
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     networks:
       - beacyn-net
 

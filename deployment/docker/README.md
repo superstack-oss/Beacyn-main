@@ -234,7 +234,7 @@ docker compose --env-file .env.docker.local exec beacyn-db mysql -u root -p
 
 | Container | Image | Purpose |
 |---|---|---|
-| `beacyn-app` | `beacyn-app:2.0.1` (built locally) | Node.js app — Express API + Vite frontend |
+| `beacyn-app` | `superstackinc/beacyn:latest` | Node.js app — Express API + Vite frontend |
 | `beacyn-db` | `mysql:8.0` | MySQL 8 database |
 | `beacyn-nginx` | `nginx:1.27-alpine` | Reverse proxy (profile: `nginx`) |
 | `beacyn-cloudflared` | `cloudflare/cloudflared:latest` | Cloudflare Tunnel connector (profile: `cloudflare`) |

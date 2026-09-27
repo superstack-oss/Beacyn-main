@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # =============================================================================
 # 01-init-bsa.sh — Beacyn MySQL initialisation: agent infrastructure database
 #

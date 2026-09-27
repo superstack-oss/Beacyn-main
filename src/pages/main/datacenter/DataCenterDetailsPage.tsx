@@ -467,7 +467,9 @@ export default function DataCenterDetailsPage({ dcId, onBack, onSaved }: DataCen
           ) : (
             <>
               <div className="overflow-auto rounded-3xl border border-zinc-200 dark:border-zinc-800">
-                <div className="relative h-[420px] min-h-[420px] min-w-[860px] overflow-hidden bg-[linear-gradient(to_right,rgba(113,113,122,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(113,113,122,0.07)_1px,transparent_1px)] bg-[size:36px_36px] p-6 dark:bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] dark:bg-[size:36px_36px]">
+                <div
+                  className="relative h-[clamp(320px,45vh,420px)] min-h-[280px] w-full min-w-[min(860px,100%)] overflow-hidden bg-[linear-gradient(to_right,rgba(113,113,122,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(113,113,122,0.07)_1px,transparent_1px)] bg-[size:36px_36px] p-6 dark:bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] dark:bg-[size:36px_36px]"
+                >
                   <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
                   {visualLinks.map((link) => {
                     const from = continuityPositions[dataCenter.id];

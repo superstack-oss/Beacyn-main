@@ -12,6 +12,8 @@ import DatabasePage from './pages/main/database/DatabasePage';
 import DatabaseDetails from './pages/main/database/DatabaseDetails';
 import DatabaseQueryInsightsPage from './pages/main/database/DatabaseQueryInsightsPage';
 import WebMonitors from './pages/main/uptime/WebMonitors';
+import SslDomainPage from './pages/main/uptime/SslDomainPage';
+import DockerPage from './pages/main/infrastructure/DockerPage';
 import AgentsPage from './pages/main/infrastructure/AgentsPage';
 import InventoryPage from './pages/main/InventoryPage';
 import SettingsPage from './pages/main/admin/SettingsPage';
@@ -231,6 +233,16 @@ function App() {
         return <InfrastructurePage key={refreshKey} view="storage" onOpenDetails={() => { }} />;
       case 'infra-san':
         return <InfrastructurePage key={refreshKey} view="san" onOpenDetails={() => { }} />;
+      case 'infra-docker':
+        return (
+          <DockerPage
+            key={refreshKey}
+            onOpenHost={(agentId) => {
+              setSelectedInfraAgentId(agentId);
+              setRoute('infra-detail');
+            }}
+          />
+        );
       case 'infra-computer':
         return <InfrastructurePage key={refreshKey} view="computer" onOpenDetails={() => { }} />;
       case 'database':
@@ -271,6 +283,7 @@ function App() {
           />
         );
       case 'monitors-web': return <WebMonitors key={refreshKey} />;
+      case 'ssl-domain': return <SslDomainPage key={refreshKey} />;
       case 'inventory-uptime': return <InventoryPage key={refreshKey} scope="uptime" />;
       case 'monitors-network': return <WebMonitors key={refreshKey} />;
       case 'agents': return <AgentsPage />;

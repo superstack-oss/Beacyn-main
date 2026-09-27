@@ -101,6 +101,9 @@ async function initDb() {
         last_checked_at TIMESTAMP NULL,
         last_response_ms INT NULL,
         ssl_expiry_at TIMESTAMP NULL,
+        domain_expiry_at TIMESTAMP NULL,
+        domain_registrar VARCHAR(255) NULL,
+        ssl_profile_json JSON NULL,
         first_up_at TIMESTAMP NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -111,6 +114,9 @@ async function initDb() {
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP NULL`,
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS last_response_ms INT NULL`,
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS ssl_expiry_at TIMESTAMP NULL`,
+      `ALTER TABLE assets ADD COLUMN IF NOT EXISTS domain_expiry_at TIMESTAMP NULL`,
+      `ALTER TABLE assets ADD COLUMN IF NOT EXISTS domain_registrar VARCHAR(255) NULL`,
+      `ALTER TABLE assets ADD COLUMN IF NOT EXISTS ssl_profile_json JSON NULL`,
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS first_up_at TIMESTAMP NULL`,
       `ALTER TABLE assets ADD COLUMN IF NOT EXISTS device_category VARCHAR(50) NULL`,
     ];

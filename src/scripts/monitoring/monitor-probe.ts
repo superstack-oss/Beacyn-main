@@ -14,6 +14,14 @@ import { fileURLToPath } from 'url';
 
 export type MonitorKind = 'website' | 'api' | 'ping' | 'port' | 'docker' | 'ssl' | 'pagespeed' | 'game' | 'grpc' | 'websocket' | 'unknown';
 
+const MULTI_PART_TLDS = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'net.uk',
+  'com.au', 'net.au', 'org.au', 'edu.au',
+  'co.in', 'net.in', 'org.in', 'gen.in', 'firm.in',
+  'co.jp', 'ne.jp', 'or.jp',
+  'com.br', 'com.mx', 'co.nz', 'com.sg', 'co.za', 'com.hk', 'com.tw',
+]);
+
 export interface MonitorError {
   code: string;
   explanation: string;
@@ -73,6 +81,7 @@ function detectMonitorKind(parentType: string, subType: string, endpoint: string
   const s = subType.toLowerCase();
   const ep = endpoint.toLowerCase();
 
+  if (p.includes('ssl') || p.includes('certificate') || s.includes('certificate')) return 'ssl';
   if (p.includes('game') || s.includes('game')) return 'game';
   if (p.includes('grpc') || s.includes('grpc') || ep.startsWith('grpc://')) return 'grpc';
   if (p.includes('websocket') || s.includes('websocket') || ep.startsWith('ws://') || ep.startsWith('wss://')) return 'websocket';
@@ -333,19 +342,68 @@ export function monitorSSLTarget(hostname: string, port = 443): Promise<MonitorR
         const validTo = new Date(cert.valid_to);
         const now = new Date();
         const daysRemaining = Math.floor((validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        const isExpired = now.getTime() > validTo.getTime();
+        const notYetValid = now.getTime() < validFrom.getTime();
+        const isAuthorized = socket.authorized;
+        const names = Array.from(new Set(
+          [
+            String(cert.subject?.CN || ''),
+            ...String(cert.subjectaltname || '').split(','),
+          ]
+            .map((part) => part.trim().replace(/^DNS:/i, ''))
+            .filter(Boolean)
+        ));
+        const hostName = hostname.toLowerCase();
+        const hostnameMatches = names.length === 0 || names.some((name) => {
+          const normalized = name.toLowerCase();
+          if (normalized === hostName) return true;
+          if (!normalized.startsWith('*.')) return false;
+          const suffix = normalized.slice(1);
+          const prefix = hostName.slice(0, hostName.length - suffix.length);
+          return hostName.endsWith(suffix) && prefix.length > 0 && !prefix.includes('.');
+        });
+        const tlsBroken = isExpired || notYetValid || !hostnameMatches;
+        const issuerOrg = String(cert.issuer?.O || '').trim();
+        const issuerCn = String(cert.issuer?.CN || '').trim();
+        const serial = String(cert.serialNumber || '').replace(/:/g, '').toUpperCase();
+        const fingerprint = String(cert.fingerprint256 || cert.fingerprint || '').replace(/:/g, '').toUpperCase();
 
         socket.end();
         finish({
-          ok: true,
-          message: 'TLS handshake successful',
+          ok: !tlsBroken,
+          message: isExpired
+            ? 'Certificate expired'
+            : notYetValid
+              ? 'Certificate is not yet valid'
+              : !hostnameMatches
+                ? 'Certificate hostname does not match the target'
+                : 'TLS handshake successful',
+          error: tlsBroken
+            ? {
+              code: isExpired ? 'MON_TLS_CERT_EXPIRED' : notYetValid ? 'MON_TLS_CERT_NOT_YET_VALID' : 'MON_TLS_HOSTNAME_MISMATCH',
+              explanation: isExpired
+                ? 'The certificate presented by the server is past its expiry.'
+                : notYetValid
+                  ? 'The certificate presented by the server is not valid yet.'
+                  : 'The certificate presented by the server does not cover this hostname.',
+            }
+            : undefined,
           diagnostics: {
-            issuer: cert.issuer?.O || cert.issuer?.CN,
-            subject: cert.subject?.CN,
+            issuer: issuerOrg || issuerCn,
+            issuerOrg,
+            issuerCn,
+            provider: certificateProvider(issuerOrg, issuerCn),
+            subject: cert.subject?.CN || names[0] || hostname,
+            names,
+            serial,
+            fingerprint,
             validFrom: validFrom.toISOString(),
             validTo: validTo.toISOString(),
             daysRemaining,
-            isExpired: now.getTime() > validTo.getTime(),
-            isAuthorized: socket.authorized,
+            isExpired,
+            notYetValid,
+            hostnameMatches,
+            isAuthorized,
           },
         });
       }
@@ -924,6 +982,140 @@ export async function monitorGameTarget(endpoint: string, fallbackType = 'minecr
   }
 }
 
+function certificateProvider(issuerOrg?: string, issuerCn?: string) {
+  const blob = `${issuerOrg || ''} ${issuerCn || ''}`.toLowerCase();
+  if (blob.includes("let's encrypt") || blob.includes('lets encrypt') || blob.includes('isrg')) return "Let's Encrypt";
+  if (blob.includes('digicert')) return 'DigiCert';
+  if (blob.includes('sectigo') || blob.includes('comodo') || blob.includes('usertrust')) return 'Sectigo';
+  if (blob.includes('apple')) return 'Apple';
+  if (blob.includes('samsung')) return 'Samsung';
+  if (blob.includes('actalis')) return 'Actalis';
+  if (blob.includes('harica')) return 'HARICA';
+  if (blob.includes('google')) return 'Google Trust Services';
+  if (blob.includes('amazon') || blob.includes('aws')) return 'Amazon';
+  if (blob.includes('cloudflare')) return 'Cloudflare';
+  if (blob.includes('globalsign')) return 'GlobalSign';
+  if (blob.includes('godaddy') || blob.includes('go daddy') || blob.includes('starfield')) return 'GoDaddy';
+  if (blob.includes('zerossl')) return 'ZeroSSL';
+  if (blob.includes('entrust')) return 'Entrust';
+  if (blob.includes('buypass')) return 'Buypass';
+  return issuerOrg || issuerCn || 'Unknown';
+}
+
+function registrableDomain(hostname: string): string | null {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, '');
+  if (!host || host.includes(':') || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return null;
+  const labels = host.split('.').filter(Boolean);
+  if (labels.length < 2) return null;
+  const lastTwo = labels.slice(-2).join('.');
+  if (MULTI_PART_TLDS.has(lastTwo) && labels.length >= 3) return labels.slice(-3).join('.');
+  return labels.slice(-2).join('.');
+}
+
+function readRdapRegistrar(json: any): string | null {
+  const entities = Array.isArray(json?.entities) ? json.entities : [];
+  const registrar = entities.find((entity: any) =>
+    (Array.isArray(entity?.roles) ? entity.roles : []).some((role: string) => String(role).toLowerCase() === 'registrar')
+  );
+  const vcard = registrar?.vcardArray?.[1];
+  if (!Array.isArray(vcard)) return null;
+  const fn = vcard.find((row: any) => Array.isArray(row) && String(row[0]).toLowerCase() === 'fn');
+  const name = fn?.[3];
+  return name ? String(name) : null;
+}
+
+const RDAP_HEADERS = {
+  Accept: 'application/rdap+json, application/json',
+  'User-Agent': 'Beacyn-Monitor/2.0',
+};
+
+let rdapBootstrap: Promise<Array<[string[], string[]]>> | null = null;
+
+function readRdapDate(events: any[], actions: string[]) {
+  const wanted = new Set(actions);
+  const match = events.find((event) => wanted.has(String(event?.eventAction || '').toLowerCase()));
+  if (!match?.eventDate) return null;
+  const date = new Date(match.eventDate);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+async function rdapServiceBases(domain: string): Promise<string[]> {
+  try {
+    if (!rdapBootstrap) {
+      rdapBootstrap = fetch('https://data.iana.org/rdap/dns.json', {
+        headers: RDAP_HEADERS,
+        signal: AbortSignal.timeout(8000),
+      }).then(async (response) => {
+        if (!response.ok) return [];
+        const json = await response.json();
+        return Array.isArray(json?.services) ? json.services : [];
+      }).catch(() => []);
+    }
+    const services = await rdapBootstrap;
+    const labels = domain.split('.');
+    for (let index = 0; index < labels.length - 1; index += 1) {
+      const suffix = labels.slice(index).join('.');
+      const match = services.find((row) => (row?.[0] || []).some((item: string) => String(item).toLowerCase() === suffix));
+      if (match?.[1]?.length) return match[1];
+    }
+  } catch {
+    rdapBootstrap = null;
+  }
+  return [];
+}
+
+async function fetchRdapDomain(domain: string) {
+  const bases = await rdapServiceBases(domain);
+  const urls = [
+    `https://rdap.org/domain/${encodeURIComponent(domain)}`,
+    ...bases.map((base) => `${String(base).replace(/\/$/, '')}/domain/${encodeURIComponent(domain)}`),
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { headers: RDAP_HEADERS, signal: AbortSignal.timeout(12000) });
+      if (!response.ok) continue;
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('json')) continue;
+      return await response.json();
+    } catch {
+      // Try the next RDAP server.
+    }
+  }
+  return null;
+}
+
+export async function lookupDomainRegistration(hostname: string): Promise<{
+  domain: string | null;
+  expiresAt: string | null;
+  registeredAt: string | null;
+  registrar: string | null;
+  statuses: string[];
+  nameServers: string[];
+}> {
+  const empty = { domain: null as string | null, expiresAt: null, registeredAt: null, registrar: null, statuses: [] as string[], nameServers: [] as string[] };
+  const domain = registrableDomain(hostname);
+  if (!domain) return empty;
+
+  try {
+    const json = await fetchRdapDomain(domain);
+    if (!json) return { ...empty, domain };
+    const events = Array.isArray(json?.events) ? json.events : [];
+    const nameServers = (Array.isArray(json?.nameservers) ? json.nameservers : [])
+      .map((server: any) => String(server?.ldhName || server?.unicodeName || '').trim())
+      .filter(Boolean);
+    return {
+      domain,
+      expiresAt: readRdapDate(events, ['expiration', 'registrar expiration']),
+      registeredAt: readRdapDate(events, ['registration']),
+      registrar: readRdapRegistrar(json),
+      statuses: (Array.isArray(json?.status) ? json.status : []).map((status: any) => String(status)),
+      nameServers,
+    };
+  } catch {
+    return { ...empty, domain };
+  }
+}
+
 export async function monitorAsset(asset: AssetLike): Promise<MonitorResult> {
   const parentType = asset.parent_type || '';
   const subType = asset.sub_type || '';
@@ -964,6 +1156,20 @@ export async function monitorAsset(asset: AssetLike): Promise<MonitorResult> {
   if (kind === 'docker') {
     const result = await monitorDockerTarget(endpoint || '/var/run/docker.sock');
     return { ...result, kind: 'docker' };
+  }
+
+  if (kind === 'ssl') {
+    const hp = normalizeHostAndPort(endpoint, 443);
+    const ssl = await monitorSSLTarget(hp.host, hp.port);
+    const domainRegistration = await lookupDomainRegistration(hp.host);
+    return {
+      ...ssl,
+      kind: 'ssl',
+      diagnostics: {
+        ...(ssl.diagnostics || {}),
+        domainRegistration,
+      },
+    };
   }
 
   if (kind === 'websocket') {

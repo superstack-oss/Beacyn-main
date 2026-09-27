@@ -192,7 +192,7 @@ export default function StatusPage({ publicToken }: { publicToken: string }) {
 
   return (
     <div
-      className="min-h-screen bg-slate-50 dark:bg-zinc-900 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 dark:text-zinc-50 relative overflow-hidden transition-colors duration-300 flex flex-col"
+      className="min-h-[100dvh] bg-slate-50 dark:bg-zinc-900 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 dark:text-zinc-50 relative overflow-hidden transition-colors duration-300 flex flex-col"
     >
       {/* Box-Grid Background */}
       <div
